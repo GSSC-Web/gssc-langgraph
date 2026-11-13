@@ -70,7 +70,7 @@ export function buildPlan(goal: string, changeSet: ChangeSet | null): PlanStep[]
       id: "scaffold_graph",
       title: "Scaffold the LangGraph assistant",
       detail:
-        "Add `src/graphs/<id>/graph.ts` with Annotation.Root + StateGraph, `export const graph = builder.compile()`, and `graph.name`. Keep smoke assistants model-free.",
+        "Add `src/graphs/<id>/graph.ts` with Annotation.Root + StateGraph, `export const graph = builder.compile()` (or `compileWithMemory` for conversational graphs), and `graph.name`. Keep smoke assistants model-free.",
     });
     steps.push({
       id: "register",
@@ -82,7 +82,7 @@ export function buildPlan(goal: string, changeSet: ChangeSet | null): PlanStep[]
     steps.push({
       id: "implement_graphs",
       title: "Implement graph changes",
-      detail: `Touch only the in-scope assistants (${graphs.join(", ")}); preserve baseline gssc5 contract ids (health, sample_agent).`,
+      detail: `Touch only the in-scope assistants (${graphs.join(", ")}); preserve baseline gssc5 contract id (health).`,
     });
   } else if (fixing) {
     steps.push({
@@ -118,7 +118,7 @@ export function buildPlan(goal: string, changeSet: ChangeSet | null): PlanStep[]
     id: "closeout",
     title: "Software closeout",
     detail:
-      "Run `bun run software` (this workflow) and `bun run review` before merge. Peer with the separate test_dev bot when test closeout is required — do not own test-bot files.",
+      "Run `bun run software` (this workflow) before merge. Peer with the separate test_dev bot when test closeout is required — do not own test-bot files.",
   });
 
   return steps;

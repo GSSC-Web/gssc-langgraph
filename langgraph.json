@@ -4,8 +4,6 @@
   "dependencies": ["."],
   "graphs": {
     "health": "./src/graphs/health/graph.ts:graph",
-    "sample_agent": "./src/graphs/sample_agent/graph.ts:graph",
-    "service_review": "./src/graphs/service_review/graph.ts:graph",
     "test_development": "./src/graphs/test_development/graph.ts:graph",
     "software_dev": "./src/graphs/software_dev/graph.ts:graph"
   },

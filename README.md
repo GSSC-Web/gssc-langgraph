@@ -28,11 +28,9 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── src/checkpoint/             # MemorySaver + compileWithMemory / threadConfig
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
-│   ├── sample_agent/graph.ts        # assistant id: sample_agent (MemorySaver)
-│   ├── service_review/graph.ts      # assistant id: service_review
 │   ├── test_development/graph.ts    # assistant id: test_development
 │   └── software_dev/graph.ts        # assistant id: software_dev
-├── src/review/                 # service review criteria, collectors, CLI
+├── src/review/                 # shared change-set collectors for tooling CLIs
 ├── src/test_dev/               # test-development contracts, analyzers, CLI
 ├── src/software/               # software_dev plan + closeout criteria, CLI
 └── tests/
@@ -59,7 +57,7 @@ const llm = createChatModel({ temperature: 0 });
 | API key env | `XAI_API_KEY` |
 | Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-Smoke assistants (`health`, `sample_agent`, `service_review`) remain **model-free** so `bun run dev` / CI work without provider keys.
+The smoke assistant (`health`) remains **model-free** so `bun run dev` / CI work without provider keys.
 
 ### Breaking / migration notes
 
@@ -126,68 +124,18 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
       "goal": "Add a domain graph for membership lookups",
       "label": "api",
       "files": {
-        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\",\"sample_agent\":\"./src/graphs/sample_agent/graph.ts:graph\"}}",
+        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
         "src/graphs/membership/graph.ts": "export const graph = {}"
       }
     }
   }'
 ```
 
-## Service review workflow
-
-Runnable agentic review (LangGraph graph + CLI), inspired by [gssc5 closeout-review skills](https://github.com/GSSC-Web/gssc5/tree/master/.agents/skills) (PASS/FAIL, scoped checks, no silent contract rewrites) but implemented here as a **model-free** Bun/TypeScript workflow for this Agent Server.
-
-### What it checks
-
-| Check | Focus |
-| --- | --- |
-| `registry` | `langgraph.json` ↔ `src/graphs/<id>/graph.ts` |
-| `graph_quality` | Annotation/StateGraph/export/`graph.name`; smoke graphs stay model-free |
-| `stack` | TypeScript + Bun + LangGraph.js (flag Python / custom HTTP servers) |
-| `gssc5_contract` | Baseline assistant ids (`health`, `sample_agent`) + sample input shape |
-| `tests` | Changed graphs have bun:test coverage |
-| `secrets` | No committed secrets / real-looking keys |
-
-**Output:** `verdict: PASS|FAIL`, `summary`, and `findings[]` with `check`, `severity`, `path`, `message`, `fix`.
-
-### Trigger locally
-
-```bash
-bun run review                 # git range vs origin/main (+ dirty tree), else workspace
-bun run review --base main
-bun run review --workspace     # full structural scan
-bun run review --diff pr.patch
-bun run review --json          # machine-readable report
-```
-
-Exit `0` on PASS, `1` on FAIL.
-
-### Trigger via Agent Server
-
-With `bun run dev`, call assistant `service_review`:
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "service_review",
-    "input": {
-      "label": "api",
-      "files": {
-        "langgraph.json": "{\"graphs\":{}}",
-        "src/graphs/orphan/graph.ts": "export const graph = {}"
-      }
-    }
-  }'
-```
-
-Prefer `bun run review` for git-aware PR/diff collection; the assistant accepts a pre-built `files` map and optional `diff` string.
-
 ## Test development workflow
 
 Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
 
-Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health/sample_agent API + structural contracts for other registered graphs).
+Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health API + structural contracts for other registered graphs).
 
 ### What it does
 
@@ -232,7 +180,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
   }'
 ```
 
-Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string (same shape as `service_review`).
+Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string.
 
 Sibling **software development** bot lives under `software_dev` / `src/software/` (separate ownership); this workflow does not implement software closeout.
 
@@ -241,8 +189,6 @@ Sibling **software development** bot lives under `software_dev` / `src/software/
 | Assistant id | Purpose | Checkpointer |
 | --- | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API | none (one-shot) |
-| `sample_agent` | Model-free echo workflow for gssc5 integration tests | **MemorySaver** (threads) |
-| `service_review` | Model-free review workflow (registry, stack, gssc5 contract, …) | none (one-shot) |
 | `test_development` | Model-free test-development workflow (contracts → plan / closeout) | none (one-shot) |
 | `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | none (one-shot) |
 
@@ -265,13 +211,16 @@ await graph.invoke({ message: "again" }, threadConfig("conversation-1"));
 
 | Concern | Detail |
 | --- | --- |
-| Which graphs | `sample_agent` today; new conversational / LLM graphs should opt in via `compileWithMemory` |
+| Which graphs | No registered graph uses MemorySaver yet; new conversational / LLM graphs should opt in via `compileWithMemory` |
 | One-shot bots | `health`, closeout-style workflows stay on `builder.compile()` (no durable turn memory) |
 | Persistence scope | **In-process** — lost on Agent Server restart. Fine for local `bun run dev` |
 | Production follow-up | Swap to a durable saver (e.g. Postgres / SQLite checkpointer) when multi-replica or restart-safe memory is required — not blocking this setup |
 | Agent Server threads | Create a thread, then stream runs with that `thread_id` (SDK or REST below) |
+| Local verification | `tests/graphs.test.ts` covers `compileWithMemory` + `threadConfig` without a dedicated demo assistant |
 
 ### Invoke with a thread (SDK)
+
+Once a conversational graph is registered and compiled with `compileWithMemory`:
 
 ```ts
 import { Client } from "@langchain/langgraph-sdk";
@@ -281,12 +230,12 @@ const client = new Client({
 });
 
 const thread = await client.threads.create();
-await client.runs.wait(thread.thread_id, "sample_agent", {
-  input: { message: "hello" },
+await client.runs.wait(thread.thread_id, "<assistant_id>", {
+  input: { /* per-graph */ },
 });
 // Same thread_id → prior checkpointed state is loaded for the next turn
-await client.runs.wait(thread.thread_id, "sample_agent", {
-  input: { message: "follow-up" },
+await client.runs.wait(thread.thread_id, "<assistant_id>", {
+  input: { /* follow-up */ },
 });
 ```
 
@@ -299,16 +248,16 @@ THREAD_ID=$(curl -s -X POST http://127.0.0.1:2024/threads \
 curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
   -H 'Content-Type: application/json' \
   -d '{
-    "assistant_id": "sample_agent",
-    "input": { "message": "hello from gssc5" }
+    "assistant_id": "<assistant_id>",
+    "input": {}
   }'
 ```
 
-Pass the same `THREAD_ID` on later runs to continue the conversation. Omit the thread (threadless `POST /runs/stream`) for one-shot invokes.
+Pass the same `THREAD_ID` on later runs to continue the conversation. Omit the thread (threadless `POST /runs/stream`) for one-shot invokes such as `health`.
 
 ## Run locally (Bun)
 
-Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|review|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
+Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
 
 ```bash
 bun install          # or: mise run install
@@ -374,10 +323,10 @@ const client = new Client({
 // Threadless health check via the health assistant
 const healthStream = client.runs.stream(null, "health", { input: {} });
 
-// Sample agent with a thread (MemorySaver persists state for this thread_id)
+// Durable thread for a conversational graph compiled with compileWithMemory
 const thread = await client.threads.create();
-const runStream = client.runs.stream(thread.thread_id, "sample_agent", {
-  input: { message: "hello from gssc5" },
+const runStream = client.runs.stream(thread.thread_id, "<assistant_id>", {
+  input: {},
 });
 // Reuse thread.thread_id on later runs to continue the conversation.
 ```
@@ -392,18 +341,7 @@ curl -s -X POST http://127.0.0.1:2024/threads \
   -d '{}'
 ```
 
-Stream a run (threadless):
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "sample_agent",
-    "input": { "message": "hello from gssc5" }
-  }'
-```
-
-Health assistant:
+Stream a run (threadless) — health assistant:
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
@@ -422,11 +360,11 @@ curl -s http://127.0.0.1:2024/ok
 | Concern | Contract |
 | --- | --- |
 | Transport | HTTP to Agent Server (`GSSC_LANGGRAPH_BASE_URL`) |
-| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, `sample_agent`, …) |
+| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, …) |
 | Stateless | `POST /runs/stream` with `thread_id` omitted / SDK `null` |
 | Stateful | `POST /threads` then `threads/{id}/runs/stream` (or SDK `runs.stream(thread_id, …)`); graphs compiled with `compileWithMemory` load prior checkpoints |
-| Input shape | Per-graph; sample agent expects `{ "message": string }` |
-| Checkpointer (local) | In-process `MemorySaver` on `sample_agent` (and future conversational graphs) |
+| Input shape | Per-graph; health accepts `{}` |
+| Checkpointer (local) | Shared in-process `MemorySaver` via `compileWithMemory` for future conversational graphs |
 | Auth (local) | None |
 | Auth (prod) | TBD — LangSmith API key and/or custom auth handler |
 

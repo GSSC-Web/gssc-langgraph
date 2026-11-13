@@ -79,7 +79,6 @@ graph.name = "Orphan";
           content: JSON.stringify({
             graphs: {
               health: "./src/graphs/health/graph.ts:graph",
-              sample_agent: "./src/graphs/sample_agent/graph.ts:graph",
             },
           }),
         },
@@ -116,7 +115,7 @@ graph.name = "Orphan";
           status: "modified",
           content: JSON.stringify({
             graphs: {
-              sample_agent: "./src/graphs/sample_agent/graph.ts:graph",
+              software_dev: "./src/graphs/software_dev/graph.ts:graph",
             },
           }),
           patch: `-  "health": "./src/graphs/health/graph.ts:graph",\n`,

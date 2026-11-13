@@ -77,7 +77,7 @@ export function compileGraph<TCompiled>(
 
 /**
  * Compile with the shared MemorySaver so thread_id-based persistence works.
- * Opt-in helper for sample_agent and future conversational / LLM graphs.
+ * Opt-in helper for conversational / LLM graphs that need thread memory.
  *
  * Direct `graph.invoke` / `stream` calls must pass `configurable.thread_id`
  * (see `threadConfig`). Agent Server / SDK runs use the thread created via

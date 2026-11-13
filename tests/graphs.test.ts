@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { Annotation, StateGraph } from "@langchain/langgraph";
 import { graph as healthGraph } from "../src/graphs/health/graph.js";
-import { graph as sampleAgentGraph } from "../src/graphs/sample_agent/graph.js";
 import {
   compileWithMemory,
   threadConfig,
 } from "../src/checkpoint/index.js";
-import { Annotation, StateGraph } from "@langchain/langgraph";
 
 describe("health graph", () => {
   test("is compiled", () => {
@@ -18,58 +17,6 @@ describe("health graph", () => {
     expect(result.status).toBe("ok");
     expect(result.service).toBe("gssc-langgraph");
     expect(result.checkedAt).toBeTruthy();
-  });
-});
-
-describe("sample_agent graph", () => {
-  test("is compiled", () => {
-    expect(sampleAgentGraph).toBeDefined();
-    expect(sampleAgentGraph.name).toBe("GSSC Sample Agent");
-  });
-
-  test("echoes message", async () => {
-    // MemorySaver requires configurable.thread_id on every invoke.
-    const result = await sampleAgentGraph.invoke(
-      { message: "hello from gssc5" },
-      threadConfig(`sample-echo-${crypto.randomUUID()}`),
-    );
-    expect(result.reply).toContain("hello from gssc5");
-    expect(result.steps).toEqual(["respond"]);
-  });
-
-  test("persists reducer state across turns with the same thread_id", async () => {
-    const config = threadConfig(`sample-multi-${crypto.randomUUID()}`);
-
-    const first = await sampleAgentGraph.invoke(
-      { message: "turn-one" },
-      config,
-    );
-    expect(first.reply).toContain("turn-one");
-    expect(first.steps).toEqual(["respond"]);
-
-    const second = await sampleAgentGraph.invoke(
-      { message: "turn-two" },
-      config,
-    );
-    expect(second.reply).toContain("turn-two");
-    // `steps` uses an append reducer — MemorySaver keeps prior turn values.
-    expect(second.steps).toEqual(["respond", "respond"]);
-
-    const snapshot = await sampleAgentGraph.getState(config);
-    expect(snapshot.values.steps).toEqual(["respond", "respond"]);
-    expect(snapshot.values.reply).toContain("turn-two");
-  });
-
-  test("isolates state across different thread_ids", async () => {
-    const a = threadConfig(`sample-a-${crypto.randomUUID()}`);
-    const b = threadConfig(`sample-b-${crypto.randomUUID()}`);
-
-    await sampleAgentGraph.invoke({ message: "only-a" }, a);
-    const resultB = await sampleAgentGraph.invoke({ message: "only-b" }, b);
-
-    expect(resultB.steps).toEqual(["respond"]);
-    expect(resultB.reply).toContain("only-b");
-    expect(resultB.reply).not.toContain("only-a");
   });
 });
 

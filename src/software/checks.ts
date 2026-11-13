@@ -175,7 +175,7 @@ export function checkMatch(cs: ChangeSet): SoftwareFinding[] {
         path: f.path,
         uid: id,
         message: `Graph "${id}" does not look like a compiled StateGraph assistant`,
-        fix: "Use Annotation + StateGraph + compile()/compileWithMemory like health/sample_agent.",
+        fix: "Use Annotation + StateGraph + compile()/compileWithMemory like health.",
       });
     }
     if (!/export\s+const\s+graph\b/.test(body)) {
@@ -256,14 +256,14 @@ export function checkQuality(cs: ChangeSet): SoftwareFinding[] {
       /ChatOpenAI|ChatAnthropic|initChatModel|from\s+["']@langchain\/openai["']|from\s+["']@langchain\/anthropic["']/.test(
         body,
       );
-    if ((id === "health" || id === "sample_agent") && usesChatModel) {
+    if (id === "health" && usesChatModel) {
       findings.push({
         check: "quality",
         severity: "error",
         path: f.path,
         uid: id,
         message: `Smoke assistant "${id}" should stay model-free`,
-        fix: "Keep health/sample_agent free of LLM nodes, or add a separate domain graph.",
+        fix: "Keep health free of LLM nodes, or add a separate domain graph.",
       });
     }
   }
@@ -295,8 +295,7 @@ export function checkThirdParty(cs: ChangeSet): SoftwareFinding[] {
     if (
       (f.path.startsWith("src/") || f.path === "package.json") &&
       body &&
-      f.path !== "src/software/criteria.ts" &&
-      f.path !== "src/review/criteria.ts"
+      f.path !== "src/software/criteria.ts"
     ) {
       for (const re of REINVENTED_SERVER_HINTS) {
         if (re.test(body)) {
