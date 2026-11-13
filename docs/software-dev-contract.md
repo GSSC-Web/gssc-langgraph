@@ -1,6 +1,6 @@
 # software_dev I/O contract
 
-Contract for short-lived Cursor / Kaneo agents invoking assistant id `software_dev` (or `bun run software --json`).
+Contract for short-lived Cursor / Kaneo agents invoking assistant id `software_dev` (or `uv run software --json`).
 
 Deterministic plan + software closeout checks are always model-free. gssc5 context loads via the **`software`** preset (`software-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
@@ -40,17 +40,17 @@ Provide a **goal** and/or a change set. Prefer combining a goal with files/diff 
 
 ```json
 {
-  "goal": "Register membership graph and cover it with bun:test",
+  "goal": "Register membership graph and cover it with pytest",
   "label": "pr-software",
   "files": {
-    "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
-    "src/graphs/membership/graph.ts": "export const graph = {}"
+    "langgraph.json": "{\"graphs\":{\"health\":\"./src/gssc_langgraph/graphs/health/graph.py:graph\"}}",
+    "src/gssc_langgraph/graphs/membership/graph.py": "from langgraph.graph import StateGraph\ngraph = StateGraph(...).compile()"
   },
   "diff": ""
 }
 ```
 
-CLI equivalent: `bun run software --goal "…" --workspace` or `--diff pr.patch` (collects the file map for you). Use `--plan-only` to skip change-set collection.
+CLI equivalent: `uv run software --goal "…" --workspace` or `--diff pr.patch` (collects the file map for you). Use `--plan-only` to skip change-set collection.
 
 ## Output
 

@@ -1,576 +1,217 @@
 # gssc-langgraph
 
-Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/overview) service for GSSC-Web. The sibling app [gssc5](https://github.com/GSSC-Web/gssc5) is expected to call this service over the LangGraph Agent Server HTTP/SDK API — this repo does **not** embed into the gssc5 process.
+Standalone [LangGraph (Python)](https://docs.langchain.com/oss/python/langgraph/overview) Agent Server for GSSC-Web. The sibling app [gssc5](https://github.com/GSSC-Web/gssc5) calls this service over the LangGraph Agent Server HTTP/SDK API — and over **MCP at `/mcp`**. This repo does **not** embed into the gssc5 process.
 
-## Assumptions (confirm with Bonyfish if needed)
+> **Stack note:** Previously TypeScript/Bun. Rewritten to Python because the Bun/JS Agent Server path did not support the MCP endpoint we need.
+
+## Assumptions
 
 | Choice | Decision |
 | --- | --- |
-| Runtime | **TypeScript + Bun** (`packageManager: bun`), LangGraph.js — not Python |
-| Serving | Official **Agent Server** via `@langchain/langgraph-cli` (`bun run dev`) — no custom HTTP framework |
-| LLM (domain graphs) | **xAI / Grok** via `@langchain/xai` `ChatXAI` (`createChatModel()` in `src/llm`) — default model `grok-4.7` |
-| Auth | **API key / Bearer** via `src/auth` + `langgraph.json` `auth` (`GSSC_LANGGRAPH_API_KEY`). Empty key = local bypass; set key to reject unauthenticated requests |
-| CORS | Prefer **gssc5 backend → this service** (server-side). Browser CORS not required for that pattern |
-| Default URL | `http://127.0.0.1:2024` (`langgraph-cli dev` default) |
-| gssc5 port | gssc5 backend defaults to `PORT=3000` — keep this service on **2024** to avoid collisions |
+| Runtime | **Python ≥3.12 + uv** (`pyproject.toml` / `uv.lock`) — LangGraph Python |
+| Serving | Official **Agent Server** via `langgraph` CLI (`mise run dev` / `uv run langgraph dev`) |
+| MCP | Enabled by default at **`/mcp`** (Streamable HTTP); each graph is an MCP tool |
+| LLM (domain graphs) | **xAI / Grok** via `langchain_xai.ChatXAI` (`create_chat_model()`) — default `grok-4.7` |
+| Auth | **API key / Bearer** via `gssc_langgraph.auth` + `langgraph.json` (`GSSC_LANGGRAPH_API_KEY`). Empty key = local bypass |
+| Default URL | `http://127.0.0.1:2024` |
+| Dot Agents | This repo has `.agents/` for Kaneo/GLG process; graphs may also load **gssc5** `.agents` skills/memories as read-only context |
 
 ## Project layout
 
 ```text
 .
-├── langgraph.json              # Agent Server config (graphs + env + auth)
-├── mise.toml                   # mise-en-place: Bun pin + task aliases
-├── package.json                # Bun package manager
-├── tsconfig.json
+├── langgraph.json                 # Agent Server config (graphs + env + auth)
+├── mise.toml                      # Python + uv pins and task aliases
+├── pyproject.toml / uv.lock
+├── .agents/                       # Dot Agents guidelines, Kaneo MCP, skills, tasks
 ├── .env.example
-├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
-├── src/auth/                   # Agent Server API-key / Bearer auth handler
-├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
-├── src/checkpoint/             # MemorySaver (default) / Sqlite / Postgres + compileWithMemory
-├── src/gssc5/                  # load/select gssc5 `.agents` skills + memories
-├── src/graphs/
-│   ├── health/graph.ts              # assistant id: health
-│   ├── conversation/graph.ts        # assistant id: conversation (checkpointer)
-│   ├── closeout_review/graph.ts     # assistant id: closeout_review (checkpointer)
-│   ├── test_development/graph.ts    # assistant id: test_development (checkpointer)
-│   └── software_dev/graph.ts        # assistant id: software_dev (checkpointer)
-├── src/review/                 # shared change-set collectors for tooling CLIs
-├── src/closeout/               # closeout_review criteria, checks, CLI
-├── src/test_dev/               # test-development contracts, analyzers, CLI
-├── src/software/               # software_dev plan + closeout criteria, CLI
-└── tests/
+├── Dockerfile
+├── src/gssc_langgraph/
+│   ├── auth/                      # Agent Server API-key / Bearer auth
+│   ├── llm/                       # xAI / Grok defaults
+│   ├── checkpoint/                # compile_with_memory for tests/helpers only
+│   ├── gssc5/                     # load/select gssc5 `.agents` skills + memories
+│   ├── graphs/
+│   │   ├── health/graph.py
+│   │   ├── conversation/graph.py
+│   │   ├── closeout_review/graph.py
+│   │   ├── test_development/graph.py
+│   │   └── software_dev/graph.py
+│   ├── review/                    # change-set collectors for CLIs
+│   ├── closeout/                  # closeout_review criteria, checks, CLI
+│   ├── test_dev/                  # test-development contracts, analyzers, CLI
+│   └── software/                  # software_dev plan + closeout, CLI
+├── docs/                          # I/O contracts
+└── tests/                         # pytest
 ```
 
-Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`. Prefer `createChatModel()` from `src/llm` when a graph needs an LLM (xAI by default). Conversational / LLM graphs and specialist tooling bots (`closeout_review`, `software_dev`, `test_development`) should `compileWithMemory` from `src/checkpoint` so clients can continue via `thread_id` and accumulate durable notes.
+## Quick start
+
+```bash
+mise install          # or: install uv + Python 3.12
+mise run install      # uv sync --all-extras
+cp .env.example .env  # optional keys
+mise run dev          # Agent Server on :2024 — MCP at /mcp
+```
+
+Without mise:
+
+```bash
+uv sync --all-extras
+uv run langgraph dev --port 2024
+uv run pytest
+```
+
+## MCP endpoint
+
+With the Agent Server running, graphs are exposed as MCP tools over Streamable HTTP:
+
+| Item | Value |
+| --- | --- |
+| URL | `http://127.0.0.1:2024/mcp` (or your deployed Agent Server `/mcp`) |
+| Transport | Streamable HTTP |
+| Tool names | Assistant ids (`health`, `conversation`, `closeout_review`, `software_dev`, `test_development`) |
+| Auth | Same as Agent Server — Bearer / `x-api-key` when `GSSC_LANGGRAPH_API_KEY` is set |
+
+Disable only if needed via `langgraph.json` → `http.disable_mcp: true` (not recommended for this service).
 
 ## LLM provider (xAI)
 
-Domain graphs that call a chat model should use the shared helper:
+```python
+from gssc_langgraph.llm import create_chat_model
 
-```ts
-import { createChatModel } from "../llm/index.js";
-// or: import { createChatModel } from "../../index.js";
-
-const llm = createChatModel({ temperature: 0 });
-// optional: createChatModel({ model: "grok-4.6" })
+llm = create_chat_model(temperature=0)
+# optional: create_chat_model(model="grok-4.6")
 ```
 
 | Concern | Default |
 | --- | --- |
-| Provider | xAI (`ChatXAI` from `@langchain/xai`) |
-| Model id | `grok-4.7` (xAI’s current general / agentic recommendation) |
-| API key env | `XAI_API_KEY` |
-| Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
+| Provider | xAI (`ChatXAI`) |
+| Model id | `grok-4.7` |
+| API key | `XAI_API_KEY` |
+| Model override | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-Smoke assistants (`health`, `conversation`) remain **model-free**. Specialist bots (`closeout_review`, `software_dev`, `test_development`) keep deterministic plan/checks model-free and skip optional synthesis when `XAI_API_KEY` is unset.
+Smoke assistants (`health`, `conversation`) are **model-free**. Specialists keep deterministic checks model-free and skip optional synthesis when `XAI_API_KEY` is unset.
 
-### Breaking / migration notes
+### LangSmith
 
-- No change to existing assistant ids or smoke-graph I/O.
-- New dependency: `@langchain/xai`.
-- Domain graphs that previously would have used OpenAI/Anthropic should call `createChatModel()` (or pass an explicit provider) instead of hard-coding `ChatOpenAI` / `ChatAnthropic`.
-- Set `XAI_API_KEY` before invoking any graph that uses the helper.
-
-### LangSmith tracing + “model of choice” (manual UI)
-
-In-repo defaults cover **code** (`ChatXAI` + env). LangSmith’s workspace **Default Model** for Playground / Evaluators / Chat / Insights is configured in the dashboard and cannot live in this repo:
-
-1. Add a workspace secret named `XAI_API_KEY` under **Settings → Integrations → Provider secrets** (provider: xAI).
-2. Open **Settings → Model configurations**, create a configuration with **Provider: xAI**, model **`grok-4.7`** (or your override), API key name `XAI_API_KEY`.
-3. In the **Feature Access** table, enable **xAI** for the features you use and set **Default Model** to that configuration.
-4. For local/Agent Server traces: set `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, and `LANGSMITH_PROJECT` in `.env` (see `.env.example`). Traces from `ChatXAI` report `ls_provider=xai` and the selected model id.
-
-## Software development bot
-
-Runnable agentic software workflow (LangGraph graph + CLI). Behavioral reference: [gssc5 software agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/software/agent.md) and [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md) (scope → implement → third-party-first → PASS/FAIL, no silent contract rewrites) — implemented here as a Bun/TypeScript workflow with **model-free plan + checks**, not a Dot Agents `.agents/` scaffold.
-
-The sibling **test** development bot is a separate assistant (`test_development` / `src/test_dev/`); this bot owns `software_dev` / `src/software/` only.
-
-**Optional synthesis:** after `verdict`, a `synthesize` node may call `createChatModel()` for a short NL `narrativeSummary` + advisory `proposedMemoryUpdates`. Without `XAI_API_KEY` the node skips (`synthesisNote: skipped: no XAI_API_KEY`) and the graph still returns a verdict + plan.
-
-Full I/O contract: [docs/software-dev-contract.md](docs/software-dev-contract.md).
-
-### What it does
-
-1. Emits a deterministic **implementation plan** from `--goal` (and optional change set).
-2. Runs software closeout checks:
-
-| Check | Focus |
-| --- | --- |
-| `scope` | Goal and/or reviewable change set present |
-| `trace` | New assistants registered in `langgraph.json` + README mention |
-| `match` | Real StateGraph + `export const graph` (not a hollow stub) |
-| `quality` | Fail-fast, size, `graph.name`, model-free smoke assistants |
-| `third_party` | LangGraph.js / Bun / langgraph-cli over reinvented HTTP or Python |
-| `discipline` | No silent baseline/contract drops; no deleting covering tests to “fix” SW |
-
-**Output:** `verdict: PASS|FAIL`, `summary`, `plan[]`, `findings[]`, plus optional `narrativeSummary` / `proposedMemoryUpdates` / `synthesisNote`.
-
-### Trigger locally
-
-```bash
-bun run software --goal "Add foo assistant that …"
-bun run software --goal "…" --workspace
-bun run software --workspace          # closeout scan of the tree
-bun run software --diff pr.patch
-bun run software --plan-only --goal "Fix health checkedAt skew"
-bun run software --json
-# or: mise run software -- --goal "…"
-```
-
-Default git base is `origin/master`. Exit `0` on PASS, `1` on FAIL.
-
-### Trigger via Agent Server
-
-With `bun run dev`, call assistant `software_dev` (add `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` or `x-api-key` when the key is configured):
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "software_dev",
-    "input": {
-      "goal": "Add a domain graph for membership lookups",
-      "label": "api",
-      "files": {
-        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
-        "src/graphs/membership/graph.ts": "export const graph = {}"
-      }
-    }
-  }'
-```
-
-## Closeout review workflow
-
-Runnable agentic **closeout reviewer** (LangGraph graph + CLI). Behavioral reference: gssc5 peer closeout skills — [requirements-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/requirements-closeout-review/SKILL.md), [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md), [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (scope → peer lanes → PASS/FAIL with proposed fixes; no silent contract rewrites) — implemented here as a Bun/TypeScript LangGraph with **model-free deterministic checks**, not a Dot Agents `.agents/` scaffold.
-
-This is a **new** assistant (`closeout_review` / `src/closeout/`), not a revival of `service_review`. Peers: `software_dev` (plan + SW closeout) and `test_development` (test plan/closeout). Baseline contract required here is **`health` only**.
-
-**gssc5 context:** after `parse_changeset`, `load_gssc5_context` uses the **`reviewer`** role preset and hard-requires the three peer closeout skills plus `backend-arch` / `public-arch` / `members-arch` memories when the checkout is available.
-
-**Optional synthesis:** after `verdict`, a `synthesize` node may call `createChatModel()` for a short NL `narrativeSummary` + advisory `proposedMemoryUpdates`. Without `XAI_API_KEY` the node skips (`synthesisNote: skipped: no XAI_API_KEY`) and the graph still returns a verdict.
-
-Full I/O contract for short-lived Cursor agents: [docs/closeout-review-contract.md](docs/closeout-review-contract.md).
-
-### What it checks
-
-| Check | gssc5 peer | Focus |
-| --- | --- | --- |
-| `scope` | all | Reviewable change set / workspace present |
-| `contracts` | requirements | Baseline `health` stays registered; no silent README/contract drops |
-| `software_trace` | software | `langgraph.json` ↔ `src/graphs/<id>/graph.ts` (+ README for new ids) |
-| `software_match` | software | Real StateGraph + `export const graph` / `compileWithMemory` (not a hollow stub) |
-| `software_quality` | software | Fail-fast, size, `graph.name`, model-free smoke/tooling |
-| `third_party` | software | LangGraph.js / Bun / langgraph-cli over reinvented HTTP or Python |
-| `test_coverage` | test | Changed / workspace graphs have bun:test coverage |
-| `test_target` | test | Intentional expects; no deleting covering tests to “fix” SW |
-| `secrets` | ops | No committed secrets / real-looking keys |
-
-**Output:** `verdict: PASS|FAIL`, `summary`, `findings[]`, plus `gssc5Context` / `gssc5ContextText`, and optional `narrativeSummary` / `proposedMemoryUpdates` / `synthesisNote`.
-
-### Trigger locally
-
-```bash
-bun run closeout                 # git range vs origin/master (+ dirty), else workspace
-bun run closeout --base master
-bun run closeout --workspace     # full structural closeout
-bun run closeout --diff pr.patch
-bun run closeout --json          # machine-readable report
-# or: mise run closeout
-```
-
-Exit `0` on PASS, `1` on FAIL.
-
-### Trigger via Agent Server
-
-With `bun run dev`, call assistant `closeout_review` (Bearer / `x-api-key` when `GSSC_LANGGRAPH_API_KEY` is set):
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "closeout_review",
-    "input": {
-      "label": "api",
-      "kaneoTaskId": "KANEO-123",
-      "prScope": "origin/master...HEAD",
-      "uids": ["health"],
-      "files": {
-        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
-        "src/graphs/orphan/graph.ts": "export const graph = {}"
-      }
-    }
-  }'
-```
-
-Prefer `bun run closeout` for git-aware PR/diff collection; the assistant accepts Kaneo task id / PR scope / UID list and/or a pre-built `files` map + optional `diff`.
-
-## Test development workflow
-
-Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a Bun/TypeScript workflow with **model-free analysis**, not a Dot Agents `.agents/` scaffold.
-
-Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health API + structural contracts for other registered graphs).
-
-**Optional synthesis:** after `verdict`, a `synthesize` node may call `createChatModel()` for a short NL `narrativeSummary` + advisory `proposedMemoryUpdates`. Without `XAI_API_KEY` the node skips and the graph still returns a verdict + plan.
-
-Full I/O contract: [docs/test-development-contract.md](docs/test-development-contract.md).
-
-### What it does
-
-| Step | Focus |
-| --- | --- |
-| `scope` | In-scope graphs from diff / workspace |
-| `coverage_map` | Each contract has a permanent bun:test locking it |
-| `target` | Tests assert the documented contract, not “whatever SW does” |
-| `asserts` | Behavior from the contract verb; flag weak/empty expects |
-| `timing` | Prefer focused `bun test <file>` commands |
-
-**Output:** `verdict: PASS|FAIL`, `summary`, `findings[]`, `coverage[]`, a development `plan[]` (add/update tests, suggested stubs), `commands[]` for focused runs, plus optional `narrativeSummary` / `proposedMemoryUpdates` / `synthesisNote`.
-
-### Trigger locally
-
-```bash
-bun run test-dev                 # git range vs origin/master (+ dirty), else workspace
-bun run test-dev --base master
-bun run test-dev --workspace     # full contract map
-bun run test-dev --diff pr.patch
-bun run test-dev --json          # machine-readable report
-bun run test-dev --run           # analysis + execute suggested focused bun test
-```
-
-Or with mise: `mise run test-dev`.
-
-Exit `0` on PASS, `1` on FAIL.
-
-### Trigger via Agent Server
-
-With `bun run dev`, call assistant `test_development` (Bearer / `x-api-key` when `GSSC_LANGGRAPH_API_KEY` is set):
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "test_development",
-    "input": {
-      "label": "workspace",
-      "files": {}
-    }
-  }'
-```
-
-Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string (same shape as `closeout_review`).
-
-Sibling **software development** bot lives under `software_dev` / `src/software/` (separate ownership); this workflow does not implement software closeout. Pre-merge **closeout review** is `closeout_review` / `src/closeout/`.
-
-## gssc5 skills / memories context
-
-Domain graphs can pull relevant [gssc5 Dot Agents](https://github.com/GSSC-Web/gssc5/tree/master/.agents) skills and architecture memories into LangGraph state as **read-only context** (this service does not copy or own those files).
-
-| Concern | Default |
-| --- | --- |
-| Locator | `GSSC5_ROOT` (filesystem path) → sibling `../gssc5` → auto-clone into `GSSC5_CACHE_DIR` |
-| Remote | `GSSC5_REPO_URL` (default `https://github.com/GSSC-Web/gssc5.git`), ref `GSSC5_REF=master` |
-| Layout | `.agents/skills/<id>/SKILL.md`, `.agents/memories/<id>.md` |
-| Relevance | Keyword/tag scoring + role presets (`software` / `test` / `reviewer`) + optional `requireSkills` |
-| Wired graphs | `software_dev`, `test_development`, `closeout_review` (not `health` / `conversation`) |
-| Missing / failed checkout | Empty `gssc5Context` + `note`; graph continues |
-
-Helpers live under `src/gssc5/` (`loadGssc5Context`, `createLoadGssc5ContextNode`). Per-invoke overrides: `configurable.gssc5Root`, `gssc5Enabled`, `preferSkills`, `requireSkills`, ….
-
-`closeout_review` uses the **`reviewer`** preset: hard-requires the three peer closeout skills (`requirements-closeout-review`, `software-closeout-review`, `test-closeout-review`) and architecture memories (`backend-arch`, `public-arch`, `members-arch`) on every run.
-
-See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md), [docs/closeout-review-contract.md](docs/closeout-review-contract.md), [docs/software-dev-contract.md](docs/software-dev-contract.md), and [docs/test-development-contract.md](docs/test-development-contract.md).
+1. Workspace secret `XAI_API_KEY` (provider: xAI).
+2. Model configuration with Provider **xAI**, model **`grok-4.7`**.
+3. Local traces: `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, `LANGSMITH_PROJECT` in `.env`.
 
 ## Registered graphs
 
-| Assistant id | Purpose | Checkpointer |
+| Assistant id | Purpose | Checkpointer (API export) |
 | --- | --- | --- |
-| `health` | Smoke / liveness payload via the same runs API (baseline contract) | none (one-shot) |
-| `conversation` | Model-free multi-turn echo demo (thread persistence) | env-selected (default **MemorySaver**) |
-| `closeout_review` | Closeout review (gssc5 reviewer context + optional LLM synthesis) | env-selected (`reviewMemory`) |
-| `test_development` | Test-development workflow (contracts → plan / closeout + optional synthesis) | env-selected (`specialistNotes`) |
-| `software_dev` | Software plan + closeout (gssc5 software-agent spirit + optional synthesis) | env-selected (`specialistNotes`) |
+| `health` | Smoke / liveness (`status` / `service` / `checkedAt`) | none (Agent Server) |
+| `conversation` | Model-free multi-turn echo | none (Agent Server) |
+| `closeout_review` | Closeout review + optional synthesis | none — `reviewMemory` via threads |
+| `test_development` | Test plan / closeout + optional synthesis | none — `specialistNotes` via threads |
+| `software_dev` | Software plan / closeout + optional synthesis | none — `specialistNotes` via threads |
 
-The Agent Server also exposes HTTP `GET /ok` for process health.
+Also: HTTP `GET /ok` for process probes.
 
-## Threads + checkpointer (short-term / durable memory)
-
-Assistants compiled with a checkpointer persist graph state **per thread**. `compileWithMemory` attaches the process-shared saver selected by env:
-
-| `GSSC_CHECKPOINT_BACKEND` | Saver | Survives restart? |
-| --- | --- | --- |
-| unset / `memory` (default) | In-process [`MemorySaver`](https://docs.langchain.com/oss/javascript/langgraph/add-memory) | No — correct for local `bun run dev` without extra setup |
-| `sqlite` | [`SqliteSaver`](https://www.npmjs.com/package/@langchain/langgraph-checkpoint-sqlite) (`better-sqlite3`) via `GSSC_CHECKPOINT_SQLITE_PATH` (default `.data/langgraph-checkpoints.sqlite`) | Yes (single node). Runs on the **Node** Agent Server spawned by `langgraph-cli` — not inside the Bun test runtime |
-| `postgres` | [`PostgresSaver`](https://www.npmjs.com/package/@langchain/langgraph-checkpoint-postgres) via `GSSC_CHECKPOINT_POSTGRES_URL` (+ optional `GSSC_CHECKPOINT_POSTGRES_SCHEMA`) | Yes (shared DB) |
-
-```ts
-import { compileWithMemory, threadConfig } from "./checkpoint/index.js";
-// or: import { compileWithMemory, threadConfig } from "./index.js";
-
-export const graph = compileWithMemory(builder, { name: "My Agent" });
-
-// Direct invoke (unit tests / scripts) — thread_id required when checkpointer is on:
-await graph.invoke({ message: "hi" }, threadConfig("conversation-1"));
-await graph.invoke({ message: "again" }, threadConfig("conversation-1"));
-```
-
-Domain specialist graphs (`closeout_review`, `software_dev`, `test_development`) also use `compileWithMemory`. Reuse the same `thread_id` so finalize can append durable notes:
-
-| Graph | Durable field | Appended by |
-| --- | --- | --- |
-| `closeout_review` | `reviewMemory` | `finalize` (verdict + summary + label) |
-| `software_dev` | `specialistNotes` | `finalize` (verdict + summary + goal/label) |
-| `test_development` | `specialistNotes` | `finalize` (verdict + summary + label) |
-
-CLI one-shots (`bun run closeout` / `software` / `test-dev`) mint a fresh `thread_id` per process. For multi-turn specialist memory over Agent Server / SDK, create a thread and reuse it. With `sqlite` or `postgres`, those notes survive Agent Server restarts for the same `thread_id`.
-
-| Concern | Detail |
-| --- | --- |
-| Which graphs | `conversation` plus specialists `closeout_review`, `software_dev`, `test_development` via `compileWithMemory`; new conversational / LLM graphs should opt in the same way |
-| One-shot bots | `health` stays on `builder.compile()` (no checkpointer / no `thread_id` required) |
-| Local default | **MemorySaver** — lost on restart; zero-config for `bun run dev` |
-| Durable | Set `GSSC_CHECKPOINT_BACKEND=sqlite` or `postgres` (see `.env.example`) |
-| Agent Server threads | Create a thread, then stream runs with that `thread_id` (SDK or REST below) |
-
-### Invoke with a thread (SDK)
-
-When `GSSC_LANGGRAPH_API_KEY` is set, pass `Authorization: Bearer …` (or `x-api-key`). Local bypass needs no header.
-
-```ts
-import { Client } from "@langchain/langgraph-sdk";
-
-const apiKey = process.env.GSSC_LANGGRAPH_API_KEY;
-const client = new Client({
-  apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
-  ...(apiKey
-    ? { defaultHeaders: { Authorization: `Bearer ${apiKey}` } }
-    : {}),
-});
-
-const thread = await client.threads.create();
-await client.runs.wait(thread.thread_id, "conversation", {
-  input: { message: "hello" },
-});
-// Same thread_id → prior checkpointed state is loaded for the next turn
-await client.runs.wait(thread.thread_id, "conversation", {
-  input: { message: "follow-up" },
-});
-
-// Specialists: reuse a thread so finalize appends durable notes
-const closeoutThread = await client.threads.create();
-await client.runs.wait(closeoutThread.thread_id, "closeout_review", {
-  input: { label: "files", files: { /* … */ } },
-});
-// Second run on the same thread → reviewMemory length grows
-await client.runs.wait(closeoutThread.thread_id, "closeout_review", {
-  input: { label: "files", files: { /* … */ } },
-});
-```
-
-### Invoke with a thread (Agent Server REST)
-
-```bash
-# Optional when GSSC_LANGGRAPH_API_KEY is set (local bypass: omit AUTH_HEADER):
-AUTH_HEADER=(-H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY")
-# or: AUTH_HEADER=(-H "x-api-key: $GSSC_LANGGRAPH_API_KEY")
-
-THREAD_ID=$(curl -s -X POST http://127.0.0.1:2024/threads \
-  "${AUTH_HEADER[@]}" \
-  -H 'Content-Type: application/json' -d '{}' | jq -r .thread_id)
-
-curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
-  "${AUTH_HEADER[@]}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "conversation",
-    "input": { "message": "hello from gssc5" }
-  }'
-```
-
-Pass the same `THREAD_ID` on later runs to continue the conversation or to grow specialist `reviewMemory` / `specialistNotes`. Omit the thread (threadless `POST /runs/stream`) only for graphs without a checkpointer such as `health` — checkpointer graphs require a `thread_id`.
-
-## Run locally (Bun)
-
-Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|closeout|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
-
-```bash
-bun install          # or: mise run install
-cp .env.example .env
-# optional: LANGSMITH_API_KEY (+ LANGSMITH_TRACING=true) for tracing / Studio
-# for domain LLM graphs: set XAI_API_KEY (smoke graphs do not need it)
-
-bun run dev          # or: mise run dev
-```
-
-This starts `@langchain/langgraph-cli` in in-memory / local mode.
-
-Expected endpoints:
-
-- API: `http://127.0.0.1:2024`
-- OpenAPI docs: `http://127.0.0.1:2024/docs`
-- Studio: URL printed by the CLI (`baseUrl=http://127.0.0.1:2024`)
-
-Unit tests (no server required):
-
-```bash
-bun test             # or: mise run test
-```
-
-Typecheck:
-
-```bash
-bun run typecheck    # or: mise run typecheck
-```
-
-### Docker / platform image
-
-For a full Agent Server image, use the CLI (recommended):
-
-```bash
-bunx @langchain/langgraph-cli build -t gssc-langgraph:local
-```
-
-The root `Dockerfile` only packages graph code with Bun; day-to-day local work should use `bun run dev`.
+I/O contracts: [docs/closeout-review-contract.md](docs/closeout-review-contract.md), [docs/software-dev-contract.md](docs/software-dev-contract.md), [docs/test-development-contract.md](docs/test-development-contract.md).
 
 ## Agent Server auth
 
-Custom auth is registered in `langgraph.json` → `auth.path` = `./src/auth/index.ts:auth`.
-
-| Mode | When | Behaviour |
-| --- | --- | --- |
-| Local bypass | `GSSC_LANGGRAPH_API_KEY` empty, or `GSSC_LANGGRAPH_AUTH_BYPASS=true` | Requests allowed (loopback `bun run dev`) |
-| Enforced | `GSSC_LANGGRAPH_API_KEY` set (comma-separated for rotation) | Missing/wrong credentials → **401**; valid Bearer / `x-api-key` → proceed |
-| Process probe | `GET /ok` | Always allowed without a key (liveness) |
-
-```bash
-# Rejected when a key is configured (no Authorization):
-curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:2024/runs/stream \
-  -H 'Content-Type: application/json' \
-  -d '{ "assistant_id": "health", "input": {} }'
-# → 401
-
-# Accepted (Bearer):
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{ "assistant_id": "health", "input": {} }'
-
-# Accepted (x-api-key):
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H "x-api-key: $GSSC_LANGGRAPH_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{ "assistant_id": "health", "input": {} }'
-```
-
-SDK clients should pass the same header:
-
-```ts
-import { Client } from "@langchain/langgraph-sdk";
-
-const client = new Client({
-  apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
-  defaultHeaders: {
-    Authorization: `Bearer ${process.env.GSSC_LANGGRAPH_API_KEY}`,
-  },
-});
-```
-
-**Cloudflare Access:** Edge Access (SSO or `CF-Access-Client-Id` / `CF-Access-Client-Secret` service tokens) may sit in front of a deployed Agent Server. That is **edge** identity and does **not** replace this app-level API key — gssc5 (and other service clients) should still send `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` to the Agent Server when the key is configured.
-
-Official: [Custom auth (JS)](https://docs.langchain.com/langsmith/auth) · [langgraph.json `auth`](https://docs.langchain.com/langsmith/cli).
-
-## How gssc5 should call this service
-
-**Base URL env (suggested for gssc5):**
-
-```bash
-GSSC_LANGGRAPH_BASE_URL=http://127.0.0.1:2024
-```
-
-### Option A — JS/TS SDK (recommended from gssc5 backend)
-
-```bash
-bun add @langchain/langgraph-sdk
-# or: npm install @langchain/langgraph-sdk
-```
-
-```ts
-import { Client } from "@langchain/langgraph-sdk";
-
-const apiKey = process.env.GSSC_LANGGRAPH_API_KEY;
-const client = new Client({
-  apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
-  // Required when GSSC_LANGGRAPH_API_KEY is set on the server (local bypass: omit).
-  ...(apiKey
-    ? { defaultHeaders: { Authorization: `Bearer ${apiKey}` } }
-    : {}),
-  // Alternative: defaultHeaders: { "x-api-key": apiKey },
-});
-
-// Threadless health check via the health assistant
-const healthStream = client.runs.stream(null, "health", { input: {} });
-
-// Conversation assistant with a thread (checkpointer persists state for this thread_id)
-const thread = await client.threads.create();
-const runStream = client.runs.stream(thread.thread_id, "conversation", {
-  input: { message: "hello from gssc5" },
-});
-// Reuse thread.thread_id on later runs to continue the conversation.
-```
-
-### Option B — REST (threads + runs)
-
-When the API key is configured, every Agent Server call below (except `GET /ok`) needs `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` or `x-api-key: $GSSC_LANGGRAPH_API_KEY`. Local `bun run dev` with an empty key skips these headers.
-
-Create a thread:
-
-```bash
-curl -s -X POST http://127.0.0.1:2024/threads \
-  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{}'
-```
-
-Stream a run (threadless) — health assistant:
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{ "assistant_id": "health", "input": {} }'
-
-# Equivalent with x-api-key:
-#   -H "x-api-key: $GSSC_LANGGRAPH_API_KEY"
-```
-
-Process liveness (no API key required):
-
-```bash
-curl -s http://127.0.0.1:2024/ok
-```
-
-### Assumed API contract for gssc5
-
-| Concern | Contract |
+| Mode | Behavior |
 | --- | --- |
-| Transport | HTTP to Agent Server (`GSSC_LANGGRAPH_BASE_URL`) |
-| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, `conversation`, …) |
-| Stateless | `POST /runs/stream` with `thread_id` omitted / SDK `null` |
-| Stateful | `POST /threads` then `threads/{id}/runs/stream` (or SDK `runs.stream(thread_id, …)`); graphs compiled with `compileWithMemory` load prior checkpoints |
-| Input shape | Per-graph; health accepts `{}`; `conversation` expects `{ "message": string }`; specialists accept their usual inputs and append `reviewMemory` / `specialistNotes` when threaded |
-| Checkpointer (default) | In-process `MemorySaver` on `conversation`, `closeout_review`, `software_dev`, `test_development` via `compileWithMemory` |
-| Checkpointer (durable) | `GSSC_CHECKPOINT_BACKEND=sqlite\|postgres` — same graphs; `reviewMemory` / `specialistNotes` survive restarts for a reused `thread_id` |
-| Auth (local) | Bypass when `GSSC_LANGGRAPH_API_KEY` is empty (or `GSSC_LANGGRAPH_AUTH_BYPASS=true`) |
-| Auth (enforced) | `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` (or `x-api-key`); see [Agent Server auth](#agent-server-auth) |
+| `GSSC_LANGGRAPH_API_KEY` empty | Local bypass (`identity: local-bypass`) |
+| Key set | Require `Authorization: Bearer <key>` or `x-api-key` |
+| `GSSC_LANGGRAPH_AUTH_BYPASS=true` | Force bypass (never in prod) |
+| `GET /ok` | Always allowed |
 
-Official references:
+```bash
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"assistant_id":"health","input":{}}'
+```
 
-- [Local server (JS)](https://docs.langchain.com/oss/javascript/langgraph/local-server)
-- [Application structure](https://docs.langchain.com/langsmith/setup-javascript)
-- [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
-- [ChatXAI (xAI / Grok)](https://docs.langchain.com/oss/javascript/integrations/chat/xai)
-- [LangSmith model configurations](https://docs.langchain.com/langsmith/model-configurations)
-- [xAI models](https://docs.x.ai/docs/models)
+## Threads + checkpointer
+
+`langgraph.json` graph exports compile **without** a custom checkpointer.
+Agent Server owns thread persistence — set `POSTGRES_URI` for a durable store.
+Do not attach `InMemorySaver` / `MemorySaver` to API-exported graphs
+(`langgraph_api` raises `GraphLoadError`).
+
+`compile_with_memory` + `GSSC_CHECKPOINT_*` are for pytest / direct-invoke
+helpers only:
+
+| `GSSC_CHECKPOINT_BACKEND` | Saver | Survives restart? |
+| --- | --- | --- |
+| unset / `memory` | In-process MemorySaver | No |
+| `sqlite` | SqliteSaver via `GSSC_CHECKPOINT_SQLITE_PATH` | Yes (single node) |
+| `postgres` | PostgresSaver via `GSSC_CHECKPOINT_POSTGRES_URL` | Yes (shared DB) |
+
+```python
+from gssc_langgraph.checkpoint import compile_with_memory, thread_config
+
+# Tests / offline scripts only — not langgraph.json exports:
+graph = compile_with_memory(builder, {"name": "My Agent"})
+await graph.ainvoke({"message": "hi"}, thread_config("conversation-1"))
+```
+
+Specialists append durable notes on the same Agent Server / SDK `thread_id`
+(`reviewMemory` / `specialistNotes`). CLI one-shots mint a fresh id per run.
+
+### SDK / REST threads
+
+```python
+from langgraph_sdk import get_client
+import os
+
+api_key = os.environ.get("GSSC_LANGGRAPH_API_KEY")
+client = get_client(
+    url=os.environ.get("GSSC_LANGGRAPH_BASE_URL", "http://127.0.0.1:2024"),
+    api_key=api_key or None,
+    headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
+)
+```
+
+```bash
+AUTH_HEADER=(-H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY")
+THREAD_ID=$(curl -s -X POST http://127.0.0.1:2024/threads \
+  "${AUTH_HEADER[@]}" -H 'Content-Type: application/json' -d '{}' | jq -r .thread_id)
+
+curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
+  "${AUTH_HEADER[@]}" -H 'Content-Type: application/json' \
+  -d '{"assistant_id":"conversation","input":{"message":"hello from gssc5"}}'
+```
+
+## Specialist CLIs
+
+```bash
+mise run closeout -- --workspace
+mise run software -- --goal "Add membership lookup assistant"
+mise run test-dev -- --workspace
+# or: uv run closeout | software | test-dev
+```
+
+Exit `0` PASS / `1` FAIL / `2` usage-runtime error.
+
+## gssc5 skills / memories (upstream context)
+
+Specialists can pull [gssc5](https://github.com/GSSC-Web/gssc5) Dot Agents skills/memories as read-only context (`GSSC5_ROOT` → sibling `../gssc5` → auto-clone cache). See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md).
+
+This repo’s **own** Dot Agents process (Kaneo **GLG**, backlog/Kaneo skills, weekly tasks) lives under [`.agents/`](.agents/agents.md).
+
+## Tests / CI
+
+```bash
+uv run pytest
+uv run python scripts/verify_sqlite_checkpoint.py
+```
+
+PR CI on `master` is path-filtered (`unit` + `sqlite` + aggregate `CI` gate). See `.github/workflows/test.yml`.
+
+## Docker
+
+Prefer `uv run langgraph build` for a full Agent Server image. The repo `Dockerfile` is a minimal uv-based packaging hint.
+
+## Non-goals
+
+- Do not reintroduce `service_review` or `sample_agent`
+- Not a StrictDoc requirements product; specialist bots are LangGraph workflows
+- Kaneo product work is separate; ALM process for this repo is `.agents/` → project **GLG**
