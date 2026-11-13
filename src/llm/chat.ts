@@ -15,8 +15,8 @@ export type CreateChatModelOptions = Omit<ChatXAIInput, "model"> & {
  * Model id defaults to `grok-4.7`, overridable via `GSSC_XAI_MODEL` / `XAI_MODEL`
  * or the `model` option.
  *
- * Smoke assistants (`health`, `sample_agent`) stay model-free and should not
- * call this helper.
+ * The smoke assistant (`health`) stays model-free and should not call this
+ * helper.
  */
 export function createChatModel(options: CreateChatModelOptions = {}): ChatXAI {
   const { model: modelOverride, apiKey, ...rest } = options;

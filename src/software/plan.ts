@@ -82,7 +82,7 @@ export function buildPlan(goal: string, changeSet: ChangeSet | null): PlanStep[]
     steps.push({
       id: "implement_graphs",
       title: "Implement graph changes",
-      detail: `Touch only the in-scope assistants (${graphs.join(", ")}); preserve baseline gssc5 contract ids (health, sample_agent).`,
+      detail: `Touch only the in-scope assistants (${graphs.join(", ")}); preserve baseline gssc5 contract id (health).`,
     });
   } else if (fixing) {
     steps.push({

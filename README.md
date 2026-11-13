@@ -27,7 +27,6 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
-│   ├── sample_agent/graph.ts        # assistant id: sample_agent
 │   ├── test_development/graph.ts    # assistant id: test_development
 │   └── software_dev/graph.ts        # assistant id: software_dev
 ├── src/review/                 # shared change-set collectors for tooling CLIs
@@ -57,7 +56,7 @@ const llm = createChatModel({ temperature: 0 });
 | API key env | `XAI_API_KEY` |
 | Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-Smoke assistants (`health`, `sample_agent`) remain **model-free** so `bun run dev` / CI work without provider keys.
+The smoke assistant (`health`) remains **model-free** so `bun run dev` / CI work without provider keys.
 
 ### Breaking / migration notes
 
@@ -124,7 +123,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
       "goal": "Add a domain graph for membership lookups",
       "label": "api",
       "files": {
-        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\",\"sample_agent\":\"./src/graphs/sample_agent/graph.ts:graph\"}}",
+        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
         "src/graphs/membership/graph.ts": "export const graph = {}"
       }
     }
@@ -135,7 +134,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
 
 Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
 
-Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health/sample_agent API + structural contracts for other registered graphs).
+Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health API + structural contracts for other registered graphs).
 
 ### What it does
 
@@ -189,7 +188,6 @@ Sibling **software development** bot lives under `software_dev` / `src/software/
 | Assistant id | Purpose |
 | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API |
-| `sample_agent` | Model-free echo workflow for gssc5 integration tests |
 | `test_development` | Model-free test-development workflow (contracts → plan / closeout) |
 | `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) |
 
@@ -263,10 +261,10 @@ const client = new Client({
 // Threadless health check via the health assistant
 const healthStream = client.runs.stream(null, "health", { input: {} });
 
-// Sample agent with a durable thread
+// Durable thread for a domain / tooling assistant
 const thread = await client.threads.create();
-const runStream = client.runs.stream(thread.thread_id, "sample_agent", {
-  input: { message: "hello from gssc5" },
+const runStream = client.runs.stream(thread.thread_id, "health", {
+  input: {},
 });
 ```
 
@@ -280,18 +278,7 @@ curl -s -X POST http://127.0.0.1:2024/threads \
   -d '{}'
 ```
 
-Stream a run (threadless):
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "sample_agent",
-    "input": { "message": "hello from gssc5" }
-  }'
-```
-
-Health assistant:
+Stream a run (threadless) — health assistant:
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
@@ -310,10 +297,10 @@ curl -s http://127.0.0.1:2024/ok
 | Concern | Contract |
 | --- | --- |
 | Transport | HTTP to Agent Server (`GSSC_LANGGRAPH_BASE_URL`) |
-| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, `sample_agent`, …) |
+| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, …) |
 | Stateless | `POST /runs/stream` with `thread_id` omitted / SDK `null` |
 | Stateful | `POST /threads` then threads/runs stream (or SDK equivalents) |
-| Input shape | Per-graph; sample agent expects `{ "message": string }` |
+| Input shape | Per-graph; health accepts `{}` |
 | Auth (local) | None |
 | Auth (prod) | TBD — LangSmith API key and/or custom auth handler |
 

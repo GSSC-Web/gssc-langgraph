@@ -7,7 +7,6 @@
  * domain graphs; keep smoke assistants model-free.
  */
 export { graph as healthGraph } from "./graphs/health/graph.js";
-export { graph as sampleAgentGraph } from "./graphs/sample_agent/graph.js";
 export {
   createChatModel,
   resolveLlmConfig,

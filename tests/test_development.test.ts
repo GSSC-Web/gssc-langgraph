@@ -66,18 +66,17 @@ describe("health graph", () => {
     });
     expect(result.verdict).toBe("PASS");
     expect(result.scopeGraphIds).toContain("health");
-    expect(result.scopeGraphIds).toContain("sample_agent");
     expect(result.scopeGraphIds).toContain("test_development");
     expect(result.steps).toContain("verdict");
   });
 });
 
 describe("test_development analyzers", () => {
-  test("maps baseline contracts from health/sample_agent tests", async () => {
+  test("maps baseline contracts from health tests", async () => {
     const cs = await collectWorkspace(process.cwd());
     const scope = resolveScope(cs);
     expect(scope.graphIds).toContain("health");
-    const contracts = resolveContracts(cs, ["health", "sample_agent"]);
+    const contracts = resolveContracts(cs, ["health"]);
     expect(contracts.length).toBeGreaterThanOrEqual(BASELINE_CONTRACTS.length);
     const { coverage, findings } = mapCoverage(cs, contracts);
     expect(coverage.every((c) => c.covered)).toBe(true);

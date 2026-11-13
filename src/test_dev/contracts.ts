@@ -27,24 +27,6 @@ export const BASELINE_CONTRACTS: Contract[] = [
     assertHints: ["checkedAt"],
     source: "baseline",
   },
-  {
-    id: "sample_agent.echo_message",
-    graphId: "sample_agent",
-    title: "Sample agent echoes message",
-    requirement:
-      "sample_agent SHALL accept `{ message: string }` and echo that text in `reply`.",
-    assertHints: ["message", "reply"],
-    source: "baseline",
-  },
-  {
-    id: "sample_agent.steps",
-    graphId: "sample_agent",
-    title: "Sample agent records respond step",
-    requirement:
-      "sample_agent SHALL record a \"respond\" step when handling a message.",
-    assertHints: ["steps", "respond"],
-    source: "baseline",
-  },
 ];
 
 const GRAPH_FILE_RE = /^src\/graphs\/([^/]+)\/graph\.tsx?$/;
