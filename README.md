@@ -26,6 +26,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
 ├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
 ├── src/checkpoint/             # MemorySaver + compileWithMemory / threadConfig
+├── src/gssc5/                  # load/select gssc5 `.agents` skills + memories
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
 │   ├── conversation/graph.ts        # assistant id: conversation (MemorySaver)
@@ -242,6 +243,23 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
 Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string (same shape as `closeout_review`).
 
 Sibling **software development** bot lives under `software_dev` / `src/software/` (separate ownership); this workflow does not implement software closeout. Pre-merge **closeout review** is `closeout_review` / `src/closeout/`.
+
+## gssc5 skills / memories context
+
+Domain graphs can pull relevant [gssc5 Dot Agents](https://github.com/GSSC-Web/gssc5/tree/master/.agents) skills and architecture memories into LangGraph state as **read-only context** (this service does not copy or own those files).
+
+| Concern | Default |
+| --- | --- |
+| Locator | `GSSC5_ROOT` (filesystem path) → sibling `../gssc5` → auto-clone into `GSSC5_CACHE_DIR` |
+| Remote | `GSSC5_REPO_URL` (default `https://github.com/GSSC-Web/gssc5.git`), ref `GSSC5_REF=master` |
+| Layout | `.agents/skills/<id>/SKILL.md`, `.agents/memories/<id>.md` |
+| Relevance | Keyword/tag scoring + role presets (`software` / `test`) + optional `requireSkills` |
+| Wired graphs | `software_dev`, `test_development` (not `health`) |
+| Missing / failed checkout | Empty `gssc5Context` + `note`; graph continues |
+
+Helpers live under `src/gssc5/` (`loadGssc5Context`, `createLoadGssc5ContextNode`). Per-invoke overrides: `configurable.gssc5Root`, `gssc5Enabled`, `preferSkills`, `requireSkills`, ….
+
+See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md).
 
 ## Registered graphs
 
