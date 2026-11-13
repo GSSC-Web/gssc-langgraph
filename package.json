@@ -11,7 +11,8 @@
     "test": "bun test",
     "typecheck": "bunx tsc -p tsconfig.json --noEmit",
     "lint": "bunx tsc -p tsconfig.json --noEmit",
-    "review": "bun run src/review/cli.ts"
+    "review": "bun run src/review/cli.ts",
+    "software": "bun run src/software/cli.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.3.2",
