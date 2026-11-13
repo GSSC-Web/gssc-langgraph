@@ -205,25 +205,36 @@ export function checkGraphQuality(cs: ChangeSet): Finding[] {
         severity: "error",
         path: f.path,
         message: `Graph "${id}" must export compiled \`graph\``,
-        fix: "export const graph = builder.compile();",
+        fix: "export const graph = builder.compile(); // or compileWithMemory(builder, { name })",
       });
     }
-    if (!/\.compile\s*\(/.test(body)) {
+    // Accept builder.compile(...) or shared helpers (compileWithMemory / compileGraph).
+    if (
+      !/\.compile\s*\(/.test(body) &&
+      !/\bcompileWithMemory\s*\(/.test(body) &&
+      !/\bcompileGraph\s*\(/.test(body)
+    ) {
       findings.push({
         check: "graph_quality",
         severity: "error",
         path: f.path,
         message: `Graph "${id}" never calls compile()`,
-        fix: "Compile the StateGraph before export.",
+        fix: "Compile the StateGraph before export (builder.compile or compileWithMemory).",
       });
     }
-    if (!/graph\.name\s*=/.test(body)) {
+    // name via graph.name = … or compile({ name }) / compileWithMemory(..., { name })
+    if (
+      !/graph\.name\s*=/.test(body) &&
+      !/\b(?:compile|compileWithMemory|compileGraph)\s*\(\s*[^)]*\bname\s*:/.test(
+        body,
+      )
+    ) {
       findings.push({
         check: "graph_quality",
         severity: "warning",
         path: f.path,
         message: `Graph "${id}" does not set graph.name`,
-        fix: 'Set graph.name = "…" for Studio / ops clarity.',
+        fix: 'Set graph.name = "…" or compileWithMemory(builder, { name: "…" }).',
       });
     }
 
