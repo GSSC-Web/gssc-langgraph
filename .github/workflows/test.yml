@@ -1,0 +1,135 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Path → job mapping (also encoded in `changes` filters below):
+# - unit    ← src/, tests/, package/lock, tsconfig, langgraph.json, mise, Dockerfile, scripts, this workflow
+# - sqlite  ← checkpoint sources, verify-sqlite script, lock/package (native deps), this workflow
+# Docs / README / .env.example-only PRs skip unit + sqlite; the `CI` gate still reports success
+# so it can be a required status check that blocks merge on failure.
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      unit: ${{ steps.filter.outputs.unit }}
+      sqlite: ${{ steps.filter.outputs.sqlite }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Filter paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            unit:
+              - 'src/**'
+              - 'tests/**'
+              - 'package.json'
+              - 'bun.lock'
+              - 'tsconfig.json'
+              - 'langgraph.json'
+              - 'mise.toml'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'scripts/**'
+              - '.github/workflows/test.yml'
+            sqlite:
+              - 'src/checkpoint/**'
+              - 'scripts/verify-sqlite-checkpoint.mjs'
+              - 'package.json'
+              - 'bun.lock'
+              - '.github/workflows/test.yml'
+
+  unit:
+    name: unit
+    needs: changes
+    if: needs.changes.outputs.unit == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MISE_CEILING_PATHS: ${{ github.workspace }}/..
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Bun
+        uses: jdx/mise-action@v5
+        with:
+          working_directory: ${{ github.workspace }}
+          experimental: true
+          install_args: bun
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit tests
+        run: bun test
+
+  sqlite:
+    name: sqlite
+    needs: changes
+    if: needs.changes.outputs.sqlite == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MISE_CEILING_PATHS: ${{ github.workspace }}/..
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Bun and Node
+        uses: jdx/mise-action@v5
+        with:
+          working_directory: ${{ github.workspace }}
+          experimental: true
+          # better-sqlite3 is Node-only; Bun installs deps, Node runs the smoke.
+          install_args: bun node
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: SQLite checkpointer smoke
+        run: bun run test:sqlite
+
+  ci:
+    name: CI
+    needs: [changes, unit, sqlite]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require selected jobs
+        run: |
+          set -euo pipefail
+          changes="${{ needs.changes.result }}"
+          unit="${{ needs.unit.result }}"
+          sqlite="${{ needs.sqlite.result }}"
+          echo "changes=$changes unit=$unit sqlite=$sqlite"
+          if [[ "$changes" != "success" ]]; then
+            echo "Change detection failed."
+            exit 1
+          fi
+          # Skipped (docs-only / unrelated paths) is OK; failure or cancel blocks merge.
+          for result in "$unit" "$sqlite"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "A required test job did not succeed."
+              exit 1
+            fi
+          done
