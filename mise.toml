@@ -1,0 +1,47 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+# gssc-langgraph: TypeScript + Bun LangGraph Agent Server.
+#
+# Install tools, then use mise tasks (or plain bun scripts):
+#   mise install
+#   mise run install   # bun install
+#   mise run dev       # Agent Server on :2024
+#   mise run test
+#   mise run typecheck
+#   mise run review
+
+min_version = "2025.10.0"
+
+[tools]
+# Match package.json packageManager (bun@1.4.4).
+bun = "1.4.4"
+
+[tasks.install]
+description = "Install package dependencies"
+alias = "i"
+run = "bun install"
+
+[tasks.dev]
+description = "Start the LangGraph Agent Server (http://127.0.0.1:2024)"
+alias = ["serve", "s"]
+run = "bun run dev"
+
+[tasks.test]
+description = "Run unit tests once"
+run = "bun test"
+
+[tasks.typecheck]
+description = "Typecheck with tsc --noEmit"
+alias = "types"
+run = "bun run typecheck"
+
+[tasks.review]
+description = "Run the service review workflow (PASS/FAIL)"
+run = "bun run review"
+
+[tasks.build]
+description = "Compile TypeScript with tsc"
+run = "bun run build"
+
+[tasks.version]
+description = "Print Bun version"
+run = "bun --version"
