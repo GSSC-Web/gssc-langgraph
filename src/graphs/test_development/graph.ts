@@ -12,6 +12,11 @@
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
 import {
+  formatGssc5Context,
+  loadGssc5ContextForRole,
+  type Gssc5ContextBundle,
+} from "../../gssc5/index.js";
+import {
   runAnalysis,
   summarize,
   verdictFrom,
@@ -76,6 +81,13 @@ const TestDevState = Annotation.Root({
   }),
   verdict: Annotation<TestDevVerdict | "">(),
   summary: Annotation<string>(),
+  /** gssc5 Dot Agents skills/memories pulled in for this turn (optional). */
+  gssc5Context: Annotation<Gssc5ContextBundle | null>({
+    reducer: (_left, right) => right ?? null,
+    default: () => null,
+  }),
+  gssc5ContextText: Annotation<string>(),
+  gssc5Root: Annotation<string>(),
   steps: StepsAnnotation,
 });
 
@@ -123,6 +135,32 @@ const parseChangeset = async (
   };
 };
 
+const loadGssc5Context = async (
+  state: typeof TestDevState.State,
+  config?: { configurable?: { gssc5Root?: string; gssc5Enabled?: boolean } },
+): Promise<typeof TestDevState.Update> => {
+  const cs = state.changeSet ?? buildChangeSet(state);
+  const pathHints = (cs.files ?? [])
+    .map((f) => f.path)
+    .slice(0, 20)
+    .join(" ");
+  const query = [state.label, pathHints, "test closeout"].filter(Boolean).join(" ");
+  const bundle = loadGssc5ContextForRole("test", {
+    query,
+    root: config?.configurable?.gssc5Root,
+    enabled: config?.configurable?.gssc5Enabled,
+    requireSkills: ["test-closeout-review"],
+    maxSkills: 3,
+    maxMemories: 2,
+  });
+  return {
+    gssc5Context: bundle,
+    gssc5ContextText: formatGssc5Context(bundle),
+    gssc5Root: bundle.root,
+    steps: ["load_gssc5_context"],
+  };
+};
+
 const analyzeScope = async (
   state: typeof TestDevState.State,
 ): Promise<typeof TestDevState.Update> => {
@@ -156,10 +194,12 @@ const finalize = async (
 
 const builder = new StateGraph(TestDevState)
   .addNode("parse_changeset", parseChangeset)
+  .addNode("load_gssc5_context", loadGssc5Context)
   .addNode("analyze", analyzeScope)
   .addNode("finalize", finalize)
   .addEdge("__start__", "parse_changeset")
-  .addEdge("parse_changeset", "analyze")
+  .addEdge("parse_changeset", "load_gssc5_context")
+  .addEdge("load_gssc5_context", "analyze")
   .addEdge("analyze", "finalize");
 
 export const graph = builder.compile();
