@@ -118,7 +118,7 @@ export function buildPlan(goal: string, changeSet: ChangeSet | null): PlanStep[]
     id: "closeout",
     title: "Software closeout",
     detail:
-      "Run `bun run software` (this workflow) and `bun run review` before merge. Peer with the separate test_dev bot when test closeout is required — do not own test-bot files.",
+      "Run `bun run software` (this workflow) before merge. Peer with the separate test_dev bot when test closeout is required — do not own test-bot files.",
   });
 
   return steps;

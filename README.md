@@ -28,10 +28,9 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
 │   ├── sample_agent/graph.ts        # assistant id: sample_agent
-│   ├── service_review/graph.ts      # assistant id: service_review
 │   ├── test_development/graph.ts    # assistant id: test_development
 │   └── software_dev/graph.ts        # assistant id: software_dev
-├── src/review/                 # service review criteria, collectors, CLI
+├── src/review/                 # shared change-set collectors for tooling CLIs
 ├── src/test_dev/               # test-development contracts, analyzers, CLI
 ├── src/software/               # software_dev plan + closeout criteria, CLI
 └── tests/
@@ -58,7 +57,7 @@ const llm = createChatModel({ temperature: 0 });
 | API key env | `XAI_API_KEY` |
 | Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-Smoke assistants (`health`, `sample_agent`, `service_review`) remain **model-free** so `bun run dev` / CI work without provider keys.
+Smoke assistants (`health`, `sample_agent`) remain **model-free** so `bun run dev` / CI work without provider keys.
 
 ### Breaking / migration notes
 
@@ -132,56 +131,6 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
   }'
 ```
 
-## Service review workflow
-
-Runnable agentic review (LangGraph graph + CLI), inspired by [gssc5 closeout-review skills](https://github.com/GSSC-Web/gssc5/tree/master/.agents/skills) (PASS/FAIL, scoped checks, no silent contract rewrites) but implemented here as a **model-free** Bun/TypeScript workflow for this Agent Server.
-
-### What it checks
-
-| Check | Focus |
-| --- | --- |
-| `registry` | `langgraph.json` ↔ `src/graphs/<id>/graph.ts` |
-| `graph_quality` | Annotation/StateGraph/export/`graph.name`; smoke graphs stay model-free |
-| `stack` | TypeScript + Bun + LangGraph.js (flag Python / custom HTTP servers) |
-| `gssc5_contract` | Baseline assistant ids (`health`, `sample_agent`) + sample input shape |
-| `tests` | Changed graphs have bun:test coverage |
-| `secrets` | No committed secrets / real-looking keys |
-
-**Output:** `verdict: PASS|FAIL`, `summary`, and `findings[]` with `check`, `severity`, `path`, `message`, `fix`.
-
-### Trigger locally
-
-```bash
-bun run review                 # git range vs origin/main (+ dirty tree), else workspace
-bun run review --base main
-bun run review --workspace     # full structural scan
-bun run review --diff pr.patch
-bun run review --json          # machine-readable report
-```
-
-Exit `0` on PASS, `1` on FAIL.
-
-### Trigger via Agent Server
-
-With `bun run dev`, call assistant `service_review`:
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "service_review",
-    "input": {
-      "label": "api",
-      "files": {
-        "langgraph.json": "{\"graphs\":{}}",
-        "src/graphs/orphan/graph.ts": "export const graph = {}"
-      }
-    }
-  }'
-```
-
-Prefer `bun run review` for git-aware PR/diff collection; the assistant accepts a pre-built `files` map and optional `diff` string.
-
 ## Test development workflow
 
 Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
@@ -231,7 +180,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
   }'
 ```
 
-Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string (same shape as `service_review`).
+Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string.
 
 Sibling **software development** bot lives under `software_dev` / `src/software/` (separate ownership); this workflow does not implement software closeout.
 
@@ -241,7 +190,6 @@ Sibling **software development** bot lives under `software_dev` / `src/software/
 | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API |
 | `sample_agent` | Model-free echo workflow for gssc5 integration tests |
-| `service_review` | Model-free review workflow (registry, stack, gssc5 contract, …) |
 | `test_development` | Model-free test-development workflow (contracts → plan / closeout) |
 | `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) |
 
@@ -249,7 +197,7 @@ The Agent Server also exposes HTTP `GET /ok` for process health.
 
 ## Run locally (Bun)
 
-Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|review|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
+Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
 
 ```bash
 bun install          # or: mise run install

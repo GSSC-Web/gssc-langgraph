@@ -286,8 +286,7 @@ export function checkThirdParty(cs: ChangeSet): SoftwareFinding[] {
     if (
       (f.path.startsWith("src/") || f.path === "package.json") &&
       body &&
-      f.path !== "src/software/criteria.ts" &&
-      f.path !== "src/review/criteria.ts"
+      f.path !== "src/software/criteria.ts"
     ) {
       for (const re of REINVENTED_SERVER_HINTS) {
         if (re.test(body)) {

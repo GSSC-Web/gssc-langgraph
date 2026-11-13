@@ -4,7 +4,7 @@ export type SoftwareVerdict = "PASS" | "FAIL";
 
 export type FindingSeverity = "error" | "warning" | "info";
 
-/** Software-closeout / development checks (distinct from service_review). */
+/** Software-closeout / development checks. */
 export type SoftwareCheckId =
   | "scope"
   | "trace"

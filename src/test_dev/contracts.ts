@@ -51,7 +51,6 @@ const GRAPH_FILE_RE = /^src\/graphs\/([^/]+)\/graph\.tsx?$/;
 
 /** Graphs that are tooling workflows — still need tests, but not gssc5 HTTP baseline. */
 export const TOOLING_GRAPH_IDS = new Set([
-  "service_review",
   "test_development",
   "software_dev",
 ]);
