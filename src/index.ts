@@ -10,6 +10,7 @@
  * LLM graphs should `compileWithMemory` and pass `configurable.thread_id`.
  */
 export { graph as healthGraph } from "./graphs/health/graph.js";
+export { graph as conversationGraph } from "./graphs/conversation/graph.js";
 export {
   createChatModel,
   resolveLlmConfig,
