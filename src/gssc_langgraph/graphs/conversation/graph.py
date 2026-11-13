@@ -1,7 +1,11 @@
-"""Model-free conversational echo graph with MemorySaver persistence.
+"""Model-free conversational echo graph for Agent Server.
 
-Demo / integration assistant for multi-turn threads (``thread_id``). Stays
-free of LLM clients so local dev and CI work without API keys.
+Demo / integration assistant for multi-turn threads. Stays free of LLM
+clients so local dev and CI work without API keys.
+
+The ``langgraph.json`` export compiles **without** a custom checkpointer —
+Agent Server owns persistence (set ``POSTGRES_URI`` for a durable store).
+Use ``compile_with_memory(builder, …)`` only in tests / direct invoke helpers.
 """
 
 from __future__ import annotations
@@ -11,8 +15,6 @@ from typing import Annotated, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-
-from gssc_langgraph.checkpoint import compile_with_memory
 
 
 class ConversationState(TypedDict, total=False):
@@ -36,4 +38,5 @@ builder.add_node("respond", respond)
 builder.add_edge(START, "respond")
 builder.add_edge("respond", END)
 
-graph = compile_with_memory(builder, {"name": "GSSC Conversation"})
+# Agent Server injects its own checkpointer; do not attach InMemorySaver here.
+graph = builder.compile(name="GSSC Conversation")

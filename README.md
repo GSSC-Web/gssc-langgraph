@@ -29,7 +29,7 @@ Standalone [LangGraph (Python)](https://docs.langchain.com/oss/python/langgraph/
 ├── src/gssc_langgraph/
 │   ├── auth/                      # Agent Server API-key / Bearer auth
 │   ├── llm/                       # xAI / Grok defaults
-│   ├── checkpoint/                # MemorySaver / Sqlite / Postgres + compile_with_memory
+│   ├── checkpoint/                # compile_with_memory for tests/helpers only
 │   ├── gssc5/                     # load/select gssc5 `.agents` skills + memories
 │   ├── graphs/
 │   │   ├── health/graph.py
@@ -101,13 +101,13 @@ Smoke assistants (`health`, `conversation`) are **model-free**. Specialists keep
 
 ## Registered graphs
 
-| Assistant id | Purpose | Checkpointer |
+| Assistant id | Purpose | Checkpointer (API export) |
 | --- | --- | --- |
-| `health` | Smoke / liveness (`status` / `service` / `checkedAt`) | none |
-| `conversation` | Model-free multi-turn echo | env-selected (default MemorySaver) |
-| `closeout_review` | Closeout review + optional synthesis | env-selected (`reviewMemory`) |
-| `test_development` | Test plan / closeout + optional synthesis | env-selected (`specialistNotes`) |
-| `software_dev` | Software plan / closeout + optional synthesis | env-selected (`specialistNotes`) |
+| `health` | Smoke / liveness (`status` / `service` / `checkedAt`) | none (Agent Server) |
+| `conversation` | Model-free multi-turn echo | none (Agent Server) |
+| `closeout_review` | Closeout review + optional synthesis | none — `reviewMemory` via threads |
+| `test_development` | Test plan / closeout + optional synthesis | none — `specialistNotes` via threads |
+| `software_dev` | Software plan / closeout + optional synthesis | none — `specialistNotes` via threads |
 
 Also: HTTP `GET /ok` for process probes.
 
@@ -131,20 +131,30 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
 
 ## Threads + checkpointer
 
+`langgraph.json` graph exports compile **without** a custom checkpointer.
+Agent Server owns thread persistence — set `POSTGRES_URI` for a durable store.
+Do not attach `InMemorySaver` / `MemorySaver` to API-exported graphs
+(`langgraph_api` raises `GraphLoadError`).
+
+`compile_with_memory` + `GSSC_CHECKPOINT_*` are for pytest / direct-invoke
+helpers only:
+
 | `GSSC_CHECKPOINT_BACKEND` | Saver | Survives restart? |
 | --- | --- | --- |
-| unset / `memory` | In-process MemorySaver | No (default for local dev) |
+| unset / `memory` | In-process MemorySaver | No |
 | `sqlite` | SqliteSaver via `GSSC_CHECKPOINT_SQLITE_PATH` | Yes (single node) |
 | `postgres` | PostgresSaver via `GSSC_CHECKPOINT_POSTGRES_URL` | Yes (shared DB) |
 
 ```python
 from gssc_langgraph.checkpoint import compile_with_memory, thread_config
 
-graph = compile_with_memory(builder, name="My Agent")
+# Tests / offline scripts only — not langgraph.json exports:
+graph = compile_with_memory(builder, {"name": "My Agent"})
 await graph.ainvoke({"message": "hi"}, thread_config("conversation-1"))
 ```
 
-Specialists append durable notes on the same `thread_id` (`reviewMemory` / `specialistNotes`). CLI one-shots mint a fresh id per run.
+Specialists append durable notes on the same Agent Server / SDK `thread_id`
+(`reviewMemory` / `specialistNotes`). CLI one-shots mint a fresh id per run.
 
 ### SDK / REST threads
 

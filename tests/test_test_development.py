@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from gssc_langgraph.checkpoint import thread_config
+from gssc_langgraph.checkpoint import compile_with_memory, thread_config
+from gssc_langgraph.graphs.test_development.graph import builder as test_dev_builder
 from gssc_langgraph.graphs.test_development.graph import graph as test_dev_graph
 from gssc_langgraph.review.collect import collect_workspace
 from gssc_langgraph.test_dev.analyze import (
@@ -109,6 +110,9 @@ async def test_passes_current_workspace_for_baseline_contracts() -> None:
 
 @pytest.mark.asyncio
 async def test_appends_specialist_notes_across_thread_turns() -> None:
+    graph = compile_with_memory(
+        test_dev_builder, {"name": "GSSC Test Development (test memory)"}
+    )
     config = thread_config(f"test-dev-mem-{uuid.uuid4()}")
     inp = {
         "label": "files",
@@ -124,9 +128,9 @@ async def test_appends_specialist_notes_across_thread_turns() -> None:
             ),
         },
     }
-    first = await test_dev_graph.ainvoke(inp, config)
+    first = await graph.ainvoke(inp, config)
     assert len(first["specialistNotes"]) == 1
-    second = await test_dev_graph.ainvoke(inp, config)
+    second = await graph.ainvoke(inp, config)
     assert len(second["specialistNotes"]) == 2
 
 

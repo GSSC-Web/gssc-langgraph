@@ -9,18 +9,18 @@ tags: [graphs, assistants, checkpointer, synthesis, closeout]
 
 Registered in `langgraph.json` (assistant id → `graph` export):
 
-| id | Checkpointer | Model | Role |
+| id | Checkpointer (API export) | Model | Role |
 | --- | --- | --- | --- |
-| `health` | none | model-free | Smoke: `status=ok`, `service=gssc-langgraph`, `checkedAt` ISO |
-| `conversation` | `compile_with_memory` | model-free | Echo + `steps` append; thread via `thread_id` |
-| `closeout_review` | `compile_with_memory` | checks model-free; optional synthesize | Peer closeout (requirements/software/test lanes) |
-| `software_dev` | `compile_with_memory` | checks model-free; optional synthesize | Plan + software closeout |
-| `test_development` | `compile_with_memory` | checks model-free; optional synthesize | Test contracts/plan/closeout |
+| `health` | none (Agent Server) | model-free | Smoke: `status=ok`, `service=gssc-langgraph`, `checkedAt` ISO |
+| `conversation` | none (Agent Server) | model-free | Echo + `steps` append; thread via Agent Server `thread_id` |
+| `closeout_review` | none (Agent Server) | checks model-free; optional synthesize | Peer closeout (requirements/software/test lanes) |
+| `software_dev` | none (Agent Server) | checks model-free; optional synthesize | Plan + software closeout |
+| `test_development` | none (Agent Server) | checks model-free; optional synthesize | Test contracts/plan/closeout |
 
 ## Checkpointer
 
-- Default: in-process `MemorySaver` (`GSSC_CHECKPOINT_BACKEND` unset or `memory`).
-- Durable: `sqlite` (`GSSC_CHECKPOINT_SQLITE_PATH`) or `postgres` (`GSSC_CHECKPOINT_POSTGRES_URL`).
+- **Agent Server exports** (`langgraph.json` `graph` objects): compile with `builder.compile(name=…)` only — no custom checkpointer. Platform persistence; set `POSTGRES_URI` for durable DB.
+- **Tests / direct invoke**: `compile_with_memory(builder, …)` may attach env-selected `MemorySaver` / Sqlite / Postgres (`GSSC_CHECKPOINT_*`). Never use that on API entrypoints (GraphLoadError).
 - Clients pass Agent Server / SDK `thread_id`. Specialists append durable notes (`reviewMemory` / `specialistNotes`) on reuse.
 
 ## Synthesis

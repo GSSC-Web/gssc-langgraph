@@ -43,8 +43,8 @@ const thread = await client.threads.create();
 await client.runs.wait(thread.thread_id, "closeout_review", {
   input: { label: "pr-closeout", files: { "README.md": "# …" } },
 });
-// Reuse thread.thread_id so reviewMemory accumulates (survives restarts when
-// GSSC_CHECKPOINT_BACKEND=sqlite|postgres).
+// Reuse thread.thread_id so reviewMemory accumulates (Agent Server persistence;
+// set POSTGRES_URI for a durable store).
 ```
 
 ## Input

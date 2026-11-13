@@ -88,11 +88,13 @@ from gssc_langgraph.gssc5 import (
 
 | Graph | Role preset | Notes |
 | --- | --- | --- |
-| `software_dev` | `software` | After `parse_input`; requires `software-closeout-review` when available |
-| `test_development` | `test` | After `parse_changeset`; requires `test-closeout-review` |
-| `closeout_review` | `reviewer` | Requires all three peer closeout skills + arch memories |
+| `software_dev` | `software` | After `parse_input`; requires `software-closeout-review` when available; append-only `specialistNotes` (Agent Server threads) |
+| `test_development` | `test` | After `parse_changeset`; requires `test-closeout-review`; query from label + paths; append-only `specialistNotes` (Agent Server threads) |
+| `closeout_review` | `reviewer` | After `parse_changeset`; `requireSkills` = all three peer closeout skills; `requireMemories` = arch trio every run; append-only `reviewMemory` (Agent Server threads) |
 
-Not wired: `health` / `conversation`.
+These specialists can run with Agent Server / SDK threads so prior `specialistNotes` / `reviewMemory` persist for the `thread_id`. Pass `configurable.thread_id` (or create a thread) — CLI one-shots mint a fresh id per run. API-exported graphs do **not** attach a custom checkpointer; Agent Server handles persistence (set `POSTGRES_URI` for a durable DB). Use `compile_with_memory` only in tests / direct invoke helpers.
+
+Not wired for gssc5 context: `health` / `conversation` (smoke assistants that do not need Dot Agents text).
 
 ## Tests
 

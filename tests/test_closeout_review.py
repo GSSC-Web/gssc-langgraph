@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from gssc_langgraph.checkpoint import thread_config
+from gssc_langgraph.checkpoint import compile_with_memory, thread_config
 from gssc_langgraph.closeout.checks import (
     check_contracts,
     check_scope,
@@ -20,6 +20,7 @@ from gssc_langgraph.closeout.checks import (
 )
 from gssc_langgraph.closeout.criteria import BASELINE_ASSISTANT_IDS
 from gssc_langgraph.closeout.types import ChangeSet
+from gssc_langgraph.graphs.closeout_review.graph import builder as closeout_builder
 from gssc_langgraph.graphs.closeout_review.graph import graph as closeout_graph
 from gssc_langgraph.gssc5 import ARCH_MEMORY_IDS, CLOSEOUT_PEER_SKILL_IDS
 from gssc_langgraph.review.collect import collect_workspace
@@ -176,11 +177,16 @@ async def test_passes_current_workspace_closeout() -> None:
 
 @pytest.mark.asyncio
 async def test_appends_review_memory_across_thread_turns() -> None:
+    # Multi-turn note accumulation needs a checkpointer; Agent Server export
+    # has none — compile the builder with MemorySaver for this unit test.
+    graph = compile_with_memory(
+        closeout_builder, {"name": "GSSC Closeout Review (test memory)"}
+    )
     config = thread_config(f"closeout-mem-{uuid.uuid4()}")
     inp = {"label": "empty-scope", "files": {}}
-    first = await closeout_graph.ainvoke(inp, config)
+    first = await graph.ainvoke(inp, config)
     assert len(first["reviewMemory"]) == 1
-    second = await closeout_graph.ainvoke(inp, config)
+    second = await graph.ainvoke(inp, config)
     assert len(second["reviewMemory"]) == 2
     assert all(n["summary"] for n in second["reviewMemory"])
 

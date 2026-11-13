@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from gssc_langgraph.checkpoint import thread_config
+from gssc_langgraph.checkpoint import compile_with_memory, thread_config
+from gssc_langgraph.graphs.software_dev.graph import builder as software_builder
 from gssc_langgraph.graphs.software_dev.graph import graph as software_graph
 from gssc_langgraph.review.collect import collect_workspace
 from gssc_langgraph.software.checks import (
@@ -85,10 +86,13 @@ async def test_plans_from_goal_alone() -> None:
 
 @pytest.mark.asyncio
 async def test_appends_specialist_notes_across_thread_turns() -> None:
+    graph = compile_with_memory(
+        software_builder, {"name": "GSSC Software Dev (test memory)"}
+    )
     config = thread_config(f"software-mem-{uuid.uuid4()}")
-    first = await software_graph.ainvoke({"goal": "First planning pass"}, config)
+    first = await graph.ainvoke({"goal": "First planning pass"}, config)
     assert len(first["specialistNotes"]) == 1
-    second = await software_graph.ainvoke(
+    second = await graph.ainvoke(
         {"goal": "Second planning pass"}, config
     )
     assert len(second["specialistNotes"]) == 2

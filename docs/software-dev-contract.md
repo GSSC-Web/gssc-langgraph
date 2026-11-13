@@ -69,7 +69,7 @@ CLI equivalent: `uv run software --goal "…" --workspace` or `--diff pr.patch` 
 | `narrativeSummary` | `string` | LLM NL summary, or deterministic `summary` when synthesis skipped |
 | `proposedMemoryUpdates` | `{ memoryId, summary, rationale? }[]` | Advisory only — never auto-applied |
 | `synthesisNote` | `string` | `ok` \| `skipped: no XAI_API_KEY` \| `skipped: disabled` \| `error: …` |
-| `specialistNotes` | object[] | Durable per-thread notes when using MemorySaver |
+| `specialistNotes` | object[] | Durable per-thread notes via Agent Server threads (or `compile_with_memory` in tests) |
 
 ### Finding shape
 

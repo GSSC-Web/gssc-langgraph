@@ -2,8 +2,11 @@
 synthesis).
 
 Invoke via Agent Server assistant id ``software_dev``, or ``software`` CLI.
-Compiled with MemorySaver (``compile_with_memory``): pass
-``configurable.thread_id`` so ``specialistNotes`` accumulate across runs.
+
+The ``langgraph.json`` export compiles **without** a custom checkpointer —
+Agent Server owns thread persistence (``POSTGRES_URI`` for durable store).
+``specialistNotes`` accumulate across Agent Server / SDK threads. For unit
+tests that need an in-process saver, use ``compile_with_memory(builder, …)``.
 """
 
 from __future__ import annotations
@@ -16,7 +19,6 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from gssc_langgraph.checkpoint import compile_with_memory
 from gssc_langgraph.gssc5 import format_gssc5_context, load_gssc5_context_for_role
 from gssc_langgraph.gssc5.types import Gssc5ContextBundle
 from gssc_langgraph.software.checks import CHECK_RUNNERS, summarize, verdict_from
@@ -243,4 +245,5 @@ builder.add_edge("check_discipline", "finalize")
 builder.add_edge("finalize", "synthesize")
 builder.add_edge("synthesize", END)
 
-graph = compile_with_memory(builder, {"name": "GSSC Software Dev"})
+# Agent Server injects its own checkpointer; do not attach InMemorySaver here.
+graph = builder.compile(name="GSSC Software Dev")

@@ -1,5 +1,8 @@
 """Process-wide default checkpointer selected by ``GSSC_CHECKPOINT_BACKEND``
-(default: MemorySaver). Initialized once at module load so Agent Server graph
+(default: MemorySaver). For tests / direct ``compile_with_memory`` only — not
+for ``langgraph.json`` exports (Agent Server supplies its own saver).
+
+Initialized once at module load so graph
 compiles attach the durable saver when configured.
 """
 
