@@ -10,5 +10,8 @@
     "software_dev": "./src/graphs/software_dev/graph.ts:graph"
   },
   "env": ".env",
+  "auth": {
+    "path": "./src/auth/index.ts:auth"
+  },
   "image_distro": "wolfi"
 }
