@@ -1,7 +1,7 @@
 [project]
 name = "gssc-langgraph"
 version = "0.1.0"
-description = "Add your description here"
+description = "GSSC LangGraph Agent Server (Python)"
 readme = "README.md"
 authors = [
     { name = "Cursor Agent", email = "cursoragent@cursor.com" }
@@ -11,6 +11,9 @@ dependencies = []
 
 [project.scripts]
 gssc-langgraph = "gssc_langgraph:main"
+closeout = "gssc_langgraph.closeout.cli:main"
+software = "gssc_langgraph.software.cli:main"
+test-dev = "gssc_langgraph.test_dev.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.8,<0.14.0"]
