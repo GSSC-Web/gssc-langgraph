@@ -68,9 +68,10 @@ function parseArgs(argv: string[]): Args {
 function printHelp(): void {
   console.log(`gssc-langgraph closeout review
 
-Run the agentic closeout_review LangGraph (model-free). Behavioral reference:
-gssc5 requirements / software / test closeout-review skills (PASS/FAIL, scoped
-checks, no silent contract rewrites) — adapted for this Agent Server.
+Run the agentic closeout_review LangGraph (model-free checks; optional LLM
+synthesis when XAI_API_KEY is set). Behavioral reference: gssc5 requirements /
+software / test closeout-review skills (PASS/FAIL, scoped checks, no silent
+contract rewrites) — adapted for this Agent Server.
 
 Usage:
   bun run closeout [options] [paths...]
@@ -127,6 +128,11 @@ async function runCloseout(cs: ChangeSet): Promise<{
   findings: CloseoutFinding[];
   checksRun: string[];
   steps: string[];
+  narrativeSummary: string;
+  proposedMemoryUpdates: unknown[];
+  synthesisNote: string;
+  gssc5Root: string;
+  gssc5Note: string;
 }> {
   const files: Record<string, string> = {};
   const fileStatuses: Record<
@@ -153,6 +159,11 @@ async function runCloseout(cs: ChangeSet): Promise<{
     findings: result.findings ?? [],
     checksRun: result.checksRun ?? [],
     steps: result.steps ?? [],
+    narrativeSummary: result.narrativeSummary || result.summary || verdict,
+    proposedMemoryUpdates: result.proposedMemoryUpdates ?? [],
+    synthesisNote: result.synthesisNote || "",
+    gssc5Root: result.gssc5Root || "",
+    gssc5Note: result.gssc5Context?.note || "",
   };
 }
 
@@ -200,10 +211,15 @@ async function main(): Promise<void> {
         {
           verdict: report.verdict,
           summary: report.summary,
+          narrativeSummary: report.narrativeSummary,
+          proposedMemoryUpdates: report.proposedMemoryUpdates,
+          synthesisNote: report.synthesisNote,
           label: cs.label,
           checksRun: report.checksRun,
           findings: report.findings,
           steps: report.steps,
+          gssc5Root: report.gssc5Root,
+          gssc5Note: report.gssc5Note,
         },
         null,
         2,
@@ -212,6 +228,9 @@ async function main(): Promise<void> {
   } else {
     console.log(`closeout_review — ${cs.label}`);
     console.log(report.summary);
+    if (report.synthesisNote) {
+      console.log(`synthesis: ${report.synthesisNote}`);
+    }
     console.log(`checks: ${report.checksRun.join(", ") || "(none)"}`);
     if (report.findings.length) {
       console.log("findings:");

@@ -61,7 +61,7 @@ const llm = createChatModel({ temperature: 0 });
 | API key env | `XAI_API_KEY` |
 | Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-Smoke/tooling assistants (`health`, `conversation`, `closeout_review`, `software_dev`, `test_development`) remain **model-free** so `bun run dev` / CI work without provider keys.
+Smoke/tooling assistants (`health`, `conversation`, `software_dev`, `test_development`) remain **model-free** so `bun run dev` / CI work without provider keys. `closeout_review` checks are model-free and skip optional synthesis when `XAI_API_KEY` is unset.
 
 ### Breaking / migration notes
 
@@ -137,9 +137,15 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
 
 ## Closeout review workflow
 
-Runnable agentic **closeout reviewer** (LangGraph graph + CLI). Behavioral reference: gssc5 peer closeout skills — [requirements-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/requirements-closeout-review/SKILL.md), [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md), [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (scope → peer lanes → PASS/FAIL with proposed fixes; no silent contract rewrites) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
+Runnable agentic **closeout reviewer** (LangGraph graph + CLI). Behavioral reference: gssc5 peer closeout skills — [requirements-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/requirements-closeout-review/SKILL.md), [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md), [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (scope → peer lanes → PASS/FAIL with proposed fixes; no silent contract rewrites) — implemented here as a Bun/TypeScript LangGraph with **model-free deterministic checks**, not a Dot Agents `.agents/` scaffold.
 
 This is a **new** assistant (`closeout_review` / `src/closeout/`), not a revival of `service_review`. Peers: `software_dev` (plan + SW closeout) and `test_development` (test plan/closeout). Baseline contract required here is **`health` only**.
+
+**gssc5 context:** after `parse_changeset`, `load_gssc5_context` uses the **`reviewer`** role preset and hard-requires the three peer closeout skills plus `backend-arch` / `public-arch` / `members-arch` memories when the checkout is available.
+
+**Optional synthesis:** after `verdict`, a `synthesize` node may call `createChatModel()` for a short NL `narrativeSummary` + advisory `proposedMemoryUpdates`. Without `XAI_API_KEY` the node skips (`synthesisNote: skipped: no XAI_API_KEY`) and the graph still returns a verdict.
+
+Full I/O contract for short-lived Cursor agents: [docs/closeout-review-contract.md](docs/closeout-review-contract.md).
 
 ### What it checks
 
@@ -155,7 +161,7 @@ This is a **new** assistant (`closeout_review` / `src/closeout/`), not a revival
 | `test_target` | test | Intentional expects; no deleting covering tests to “fix” SW |
 | `secrets` | ops | No committed secrets / real-looking keys |
 
-**Output:** `verdict: PASS|FAIL`, `summary`, and `findings[]` with `check`, `severity`, `path`, `uid?`, `message`, `fix`.
+**Output:** `verdict: PASS|FAIL`, `summary`, `findings[]`, plus `gssc5Context` / `gssc5ContextText`, and optional `narrativeSummary` / `proposedMemoryUpdates` / `synthesisNote`.
 
 ### Trigger locally
 
@@ -181,6 +187,9 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
     "assistant_id": "closeout_review",
     "input": {
       "label": "api",
+      "kaneoTaskId": "KANEO-123",
+      "prScope": "origin/master...HEAD",
+      "uids": ["health"],
       "files": {
         "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
         "src/graphs/orphan/graph.ts": "export const graph = {}"
@@ -189,7 +198,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
   }'
 ```
 
-Prefer `bun run closeout` for git-aware PR/diff collection; the assistant accepts a pre-built `files` map and optional `diff` string.
+Prefer `bun run closeout` for git-aware PR/diff collection; the assistant accepts Kaneo task id / PR scope / UID list and/or a pre-built `files` map + optional `diff`.
 
 ## Test development workflow
 
@@ -253,13 +262,15 @@ Domain graphs can pull relevant [gssc5 Dot Agents](https://github.com/GSSC-Web/g
 | Locator | `GSSC5_ROOT` (filesystem path) → sibling `../gssc5` → auto-clone into `GSSC5_CACHE_DIR` |
 | Remote | `GSSC5_REPO_URL` (default `https://github.com/GSSC-Web/gssc5.git`), ref `GSSC5_REF=master` |
 | Layout | `.agents/skills/<id>/SKILL.md`, `.agents/memories/<id>.md` |
-| Relevance | Keyword/tag scoring + role presets (`software` / `test`) + optional `requireSkills` |
-| Wired graphs | `software_dev`, `test_development` (not `health`) |
+| Relevance | Keyword/tag scoring + role presets (`software` / `test` / `reviewer`) + optional `requireSkills` |
+| Wired graphs | `software_dev`, `test_development`, `closeout_review` (not `health` / `conversation`) |
 | Missing / failed checkout | Empty `gssc5Context` + `note`; graph continues |
 
 Helpers live under `src/gssc5/` (`loadGssc5Context`, `createLoadGssc5ContextNode`). Per-invoke overrides: `configurable.gssc5Root`, `gssc5Enabled`, `preferSkills`, `requireSkills`, ….
 
-See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md).
+`closeout_review` uses the **`reviewer`** preset: hard-requires the three peer closeout skills (`requirements-closeout-review`, `software-closeout-review`, `test-closeout-review`) and architecture memories (`backend-arch`, `public-arch`, `members-arch`) on every run.
+
+See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md) and [docs/closeout-review-contract.md](docs/closeout-review-contract.md).
 
 ## Registered graphs
 
@@ -267,7 +278,7 @@ See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md).
 | --- | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API (baseline contract) | none (one-shot) |
 | `conversation` | Model-free multi-turn echo demo (thread persistence) | **MemorySaver** |
-| `closeout_review` | Model-free closeout review (gssc5 peer closeout skills) | none (one-shot) |
+| `closeout_review` | Closeout review (gssc5 reviewer context + optional LLM synthesis) | none (one-shot) |
 | `test_development` | Model-free test-development workflow (contracts → plan / closeout) | none (one-shot) |
 | `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | none (one-shot) |
 

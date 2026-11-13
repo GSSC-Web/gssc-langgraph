@@ -1,5 +1,5 @@
 /**
- * Agentic closeout review workflow (model-free).
+ * Agentic closeout review workflow (model-free checks + optional LLM synthesis).
  *
  * Behavioral reference: gssc5 peer closeout skills
  * (requirements-closeout-review + software-closeout-review +
@@ -11,19 +11,32 @@
  *
  * Ownership: `closeout_review` / `src/closeout/` only. Peers:
  * `software_dev` (plan + SW closeout), `test_development` (test plan/closeout).
+ *
+ * gssc5: loads reviewer-preset skills/memories via `load_gssc5_context`.
+ * Optional synthesis (xAI chat helper) runs after deterministic checks and
+ * skips cleanly when `XAI_API_KEY` is absent.
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
+import {
+  ARCH_MEMORY_IDS,
+  CLOSEOUT_PEER_SKILL_IDS,
+  formatGssc5Context,
+  loadGssc5ContextForRole,
+  type Gssc5ContextBundle,
+} from "../../gssc5/index.js";
 import {
   CHECK_RUNNERS,
   summarize,
   verdictFrom,
 } from "../../closeout/checks.js";
+import { synthesizeCloseout } from "../../closeout/synthesize.js";
 import type {
   ChangeSet,
   ChangedFile,
   CloseoutCheckId,
   CloseoutFinding,
   CloseoutVerdict,
+  ProposedMemoryUpdate,
 } from "../../closeout/types.js";
 
 const FindingAnnotation = Annotation<CloseoutFinding[]>({
@@ -33,6 +46,16 @@ const FindingAnnotation = Annotation<CloseoutFinding[]>({
 
 const StepsAnnotation = Annotation<string[]>({
   reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
+  default: () => [],
+});
+
+const UidsAnnotation = Annotation<string[]>({
+  reducer: (_left, right) => right ?? [],
+  default: () => [],
+});
+
+const ProposedMemoryAnnotation = Annotation<ProposedMemoryUpdate[]>({
+  reducer: (_left, right) => right ?? [],
   default: () => [],
 });
 
@@ -46,6 +69,13 @@ const CloseoutState = Annotation.Root({
   /** Optional explicit file statuses when providing `files`. */
   fileStatuses: Annotation<Record<string, ChangedFile["status"]>>(),
 
+  /** Kaneo task id when reviewing a tracked defect/task. */
+  kaneoTaskId: Annotation<string>(),
+  /** PR / git scope hint (URL, `base...head`, or branch). */
+  prScope: Annotation<string>(),
+  /** Explicit requirement / assistant / contract UIDs in scope. */
+  uids: UidsAnnotation,
+
   /** Internal / output */
   changeSet: Annotation<ChangeSet | null>(),
   findings: FindingAnnotation,
@@ -55,6 +85,17 @@ const CloseoutState = Annotation.Root({
   }),
   verdict: Annotation<CloseoutVerdict | "">(),
   summary: Annotation<string>(),
+  /** gssc5 Dot Agents skills/memories pulled in for this turn (optional). */
+  gssc5Context: Annotation<Gssc5ContextBundle | null>({
+    reducer: (_left, right) => right ?? null,
+    default: () => null,
+  }),
+  gssc5ContextText: Annotation<string>(),
+  gssc5Root: Annotation<string>(),
+  /** Optional LLM narrative (falls back to deterministic summary when skipped). */
+  narrativeSummary: Annotation<string>(),
+  proposedMemoryUpdates: ProposedMemoryAnnotation,
+  synthesisNote: Annotation<string>(),
   steps: StepsAnnotation,
 });
 
@@ -103,6 +144,44 @@ const parseChangeset = async (
   };
 };
 
+const loadGssc5Context = async (
+  state: typeof CloseoutState.State,
+  config?: { configurable?: { gssc5Root?: string; gssc5Enabled?: boolean } },
+): Promise<typeof CloseoutState.Update> => {
+  const cs = state.changeSet ?? buildChangeSet(state);
+  const pathHints = (cs.files ?? [])
+    .map((f) => f.path)
+    .slice(0, 20)
+    .join(" ");
+  const query = [
+    state.label,
+    state.kaneoTaskId,
+    state.prScope,
+    (state.uids ?? []).join(" "),
+    pathHints,
+    "closeout review requirements software test",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const bundle = loadGssc5ContextForRole("reviewer", {
+    query,
+    root: config?.configurable?.gssc5Root,
+    enabled: config?.configurable?.gssc5Enabled,
+    requireSkills: [...CLOSEOUT_PEER_SKILL_IDS],
+    requireMemories: [...ARCH_MEMORY_IDS],
+    maxSkills: 3,
+    maxMemories: 3,
+  });
+
+  return {
+    gssc5Context: bundle,
+    gssc5ContextText: formatGssc5Context(bundle),
+    gssc5Root: bundle.root,
+    steps: ["load_gssc5_context"],
+  };
+};
+
 function makeCheckNode(checkId: CloseoutCheckId) {
   return async (
     state: typeof CloseoutState.State,
@@ -130,8 +209,31 @@ const finalize = async (
   };
 };
 
+const synthesize = async (
+  state: typeof CloseoutState.State,
+  config?: { configurable?: { synthesisEnabled?: boolean } },
+): Promise<typeof CloseoutState.Update> => {
+  const result = await synthesizeCloseout({
+    verdict: state.verdict ?? "",
+    summary: state.summary ?? "",
+    findings: state.findings ?? [],
+    gssc5ContextText: state.gssc5ContextText,
+    kaneoTaskId: state.kaneoTaskId,
+    prScope: state.prScope,
+    uids: state.uids,
+    enabled: config?.configurable?.synthesisEnabled,
+  });
+  return {
+    narrativeSummary: result.narrativeSummary,
+    proposedMemoryUpdates: result.proposedMemoryUpdates,
+    synthesisNote: result.note,
+    steps: ["synthesize"],
+  };
+};
+
 const builder = new StateGraph(CloseoutState)
   .addNode("parse_changeset", parseChangeset)
+  .addNode("load_gssc5_context", loadGssc5Context)
   .addNode("check_scope", makeCheckNode("scope"))
   .addNode("check_contracts", makeCheckNode("contracts"))
   .addNode("check_software_trace", makeCheckNode("software_trace"))
@@ -142,8 +244,10 @@ const builder = new StateGraph(CloseoutState)
   .addNode("check_test_target", makeCheckNode("test_target"))
   .addNode("check_secrets", makeCheckNode("secrets"))
   .addNode("finalize", finalize)
+  .addNode("synthesize", synthesize)
   .addEdge("__start__", "parse_changeset")
-  .addEdge("parse_changeset", "check_scope")
+  .addEdge("parse_changeset", "load_gssc5_context")
+  .addEdge("load_gssc5_context", "check_scope")
   .addEdge("check_scope", "check_contracts")
   .addEdge("check_contracts", "check_software_trace")
   .addEdge("check_software_trace", "check_software_match")
@@ -152,7 +256,8 @@ const builder = new StateGraph(CloseoutState)
   .addEdge("check_third_party", "check_test_coverage")
   .addEdge("check_test_coverage", "check_test_target")
   .addEdge("check_test_target", "check_secrets")
-  .addEdge("check_secrets", "finalize");
+  .addEdge("check_secrets", "finalize")
+  .addEdge("finalize", "synthesize");
 
 export const graph = builder.compile();
 graph.name = "GSSC Closeout Review";
