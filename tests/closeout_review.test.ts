@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { threadConfig } from "../src/checkpoint/index.js";
 import { graph as closeoutGraph } from "../src/graphs/closeout_review/graph.js";
 import {
   checkContracts,
@@ -36,7 +37,7 @@ graph.name = "GSSC Health";
 };
 
 describe("closeout_review graph", () => {
-  test("is compiled", () => {
+  test("is compiled with MemorySaver", () => {
     expect(closeoutGraph).toBeDefined();
     expect(closeoutGraph.name).toBe("GSSC Closeout Review");
   });
@@ -55,7 +56,12 @@ describe("closeout_review graph", () => {
         uids: ["health"],
         files: MINIMAL_FILES,
       },
-      { configurable: { gssc5Root: FIXTURE_ROOT } },
+      {
+        configurable: {
+          thread_id: `closeout-gssc5-${crypto.randomUUID()}`,
+          gssc5Root: FIXTURE_ROOT,
+        },
+      },
     );
 
     expect(result.steps).toContain("load_gssc5_context");
@@ -83,6 +89,7 @@ describe("closeout_review graph", () => {
       },
       {
         configurable: {
+          thread_id: `closeout-missing-${crypto.randomUUID()}`,
           gssc5Root: "/tmp/missing-gssc5-closeout-xyz",
           gssc5Enabled: true,
         },
@@ -100,7 +107,12 @@ describe("closeout_review graph", () => {
         label: "disabled-gssc5",
         files: MINIMAL_FILES,
       },
-      { configurable: { gssc5Enabled: false } },
+      {
+        configurable: {
+          thread_id: `closeout-disabled-${crypto.randomUUID()}`,
+          gssc5Enabled: false,
+        },
+      },
     );
 
     expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);
@@ -121,15 +133,18 @@ describe("closeout_review graph", () => {
         status: f.status,
       })),
     };
-    const result = await closeoutGraph.invoke({
-      label: cs.label,
-      changeSet: cs,
-      files: Object.fromEntries(
-        cs.files
-          .filter((f) => f.content !== undefined)
-          .map((f) => [f.path, f.content!]),
-      ),
-    });
+    const result = await closeoutGraph.invoke(
+      {
+        label: cs.label,
+        changeSet: cs,
+        files: Object.fromEntries(
+          cs.files
+            .filter((f) => f.content !== undefined)
+            .map((f) => [f.path, f.content!]),
+        ),
+      },
+      threadConfig(`closeout-workspace-${crypto.randomUUID()}`),
+    );
     expect(result.verdict).toBe("PASS");
     expect(result.checksRun).toContain("scope");
     expect(result.checksRun).toContain("contracts");
@@ -137,6 +152,21 @@ describe("closeout_review graph", () => {
     expect(result.steps).toContain("verdict");
     expect(result.steps).toContain("load_gssc5_context");
     expect(result.steps).toContain("synthesize");
+    expect(result.reviewMemory.length).toBe(1);
+    expect(result.reviewMemory[0]?.verdict).toBe("PASS");
+  });
+
+  test("appends reviewMemory across thread turns", async () => {
+    const config = threadConfig(`closeout-mem-${crypto.randomUUID()}`);
+    const input = {
+      label: "empty-scope",
+      files: {} as Record<string, string>,
+    };
+    const first = await closeoutGraph.invoke(input, config);
+    expect(first.reviewMemory.length).toBe(1);
+    const second = await closeoutGraph.invoke(input, config);
+    expect(second.reviewMemory.length).toBe(2);
+    expect(second.reviewMemory.every((n) => n.summary.length > 0)).toBe(true);
   });
 
   test("FAILs when new graph is unregistered", () => {

@@ -92,11 +92,13 @@ import {
 
 | Graph | Role preset | Notes |
 | --- | --- | --- |
-| `software_dev` | `software` | After `parse_input`; requires `software-closeout-review` when available |
-| `test_development` | `test` | After `parse_changeset`; requires `test-closeout-review`; query from label + paths |
-| `closeout_review` | `reviewer` | After `parse_changeset`; `requireSkills` = all three peer closeout skills; `requireMemories` = arch trio every run |
+| `software_dev` | `software` | After `parse_input`; requires `software-closeout-review` when available; `compileWithMemory` + append-only `specialistNotes` |
+| `test_development` | `test` | After `parse_changeset`; requires `test-closeout-review`; query from label + paths; `compileWithMemory` + append-only `specialistNotes` |
+| `closeout_review` | `reviewer` | After `parse_changeset`; `requireSkills` = all three peer closeout skills; `requireMemories` = arch trio every run; `compileWithMemory` + append-only `reviewMemory` |
 
-Not wired: `health` / `conversation` (smoke assistants that do not need Dot Agents text).
+These specialists can run with Agent Server / SDK threads so prior `specialistNotes` / `reviewMemory` persist for the `thread_id`. Pass `configurable.thread_id` (or create a thread) — CLI one-shots mint a fresh id per run.
+
+Not wired for gssc5 context: `health` / `conversation` (smoke assistants that do not need Dot Agents text).
 
 ## Tests
 

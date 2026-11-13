@@ -255,7 +255,12 @@ describe("graph wiring", () => {
   test("software_dev includes load_gssc5_context step", async () => {
     const result = await softwareGraph.invoke(
       { goal: "Add backend membership graph with elysia" },
-      { configurable: { gssc5Root: FIXTURE_ROOT } },
+      {
+        configurable: {
+          thread_id: `gssc5-software-${crypto.randomUUID()}`,
+          gssc5Root: FIXTURE_ROOT,
+        },
+      },
     );
     expect(result.steps).toContain("load_gssc5_context");
     expect(
@@ -295,7 +300,12 @@ describe("health graph", () => {
 `,
         },
       },
-      { configurable: { gssc5Root: FIXTURE_ROOT } },
+      {
+        configurable: {
+          thread_id: `gssc5-test-dev-${crypto.randomUUID()}`,
+          gssc5Root: FIXTURE_ROOT,
+        },
+      },
     );
     expect(result.steps).toContain("load_gssc5_context");
     expect(
@@ -322,7 +332,12 @@ graph.name = "GSSC Health";
 `,
         },
       },
-      { configurable: { gssc5Root: FIXTURE_ROOT } },
+      {
+        configurable: {
+          thread_id: `gssc5-closeout-${crypto.randomUUID()}`,
+          gssc5Root: FIXTURE_ROOT,
+        },
+      },
     );
     expect(result.steps).toContain("load_gssc5_context");
     expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);

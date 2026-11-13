@@ -13,6 +13,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { $ } from "bun";
+import { threadConfig } from "../checkpoint/index.js";
 import { graph } from "../graphs/test_development/graph.js";
 import {
   collectFromDiff,
@@ -24,6 +25,7 @@ import type {
   ChangeSet,
   Finding,
   PlanItem,
+  SpecialistNote,
   TestDevVerdict,
 } from "./types.js";
 
@@ -119,6 +121,7 @@ async function runTestDev(cs: ChangeSet): Promise<{
   plan: PlanItem[];
   commands: string[];
   steps: string[];
+  specialistNotes: SpecialistNote[];
 }> {
   const files: Record<string, string> = {};
   const fileStatuses: Record<
@@ -130,13 +133,17 @@ async function runTestDev(cs: ChangeSet): Promise<{
     fileStatuses[f.path] = f.status;
   }
 
-  const result = await graph.invoke({
-    diff: cs.diff ?? "",
-    files,
-    fileStatuses,
-    label: cs.label,
-    changeSet: cs,
-  });
+  // One-shot CLI: fresh thread_id. Reuse a stable id for multi-turn memory.
+  const result = await graph.invoke(
+    {
+      diff: cs.diff ?? "",
+      files,
+      fileStatuses,
+      label: cs.label,
+      changeSet: cs,
+    },
+    threadConfig(`test-dev-cli-${crypto.randomUUID()}`),
+  );
 
   const verdict = (result.verdict || "FAIL") as TestDevVerdict;
   return {
@@ -150,6 +157,7 @@ async function runTestDev(cs: ChangeSet): Promise<{
     plan: result.plan ?? [],
     commands: result.commands ?? [],
     steps: result.steps ?? [],
+    specialistNotes: result.specialistNotes ?? [],
   };
 }
 
@@ -221,6 +229,7 @@ async function main(): Promise<void> {
           coverage: report.coverage,
           plan: report.plan,
           commands: report.commands,
+          specialistNotes: report.specialistNotes,
           steps: report.steps,
         },
         null,

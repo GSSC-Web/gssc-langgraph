@@ -83,3 +83,11 @@ export type TestDevReport = {
   plan: PlanItem[];
   commands: string[];
 };
+
+/** Durable per-thread note appended by finalize when using MemorySaver. */
+export type SpecialistNote = {
+  at: string;
+  verdict: TestDevVerdict;
+  summary: string;
+  label?: string;
+};

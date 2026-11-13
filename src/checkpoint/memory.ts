@@ -53,8 +53,9 @@ type CompileOpts = {
 /**
  * Compile a StateGraph builder, optionally with a checkpointer.
  *
- * New conversational / LLM graphs should prefer `compileWithMemory`.
- * One-shot review/dev bots can keep `builder.compile()` or call
+ * Prefer `compileWithMemory` for conversational / LLM graphs and for
+ * specialists that accumulate durable notes. Pure one-shot smoke graphs
+ * (e.g. `health`) can keep `builder.compile()` or call
  * `compileGraph(builder, { persist: false, name: "…" })`.
  */
 export function compileGraph<TCompiled>(
@@ -77,11 +78,15 @@ export function compileGraph<TCompiled>(
 
 /**
  * Compile with the shared MemorySaver so thread_id-based persistence works.
- * Opt-in helper for `conversation` and future conversational / LLM graphs.
+ * Used by `conversation` and specialist bots (`closeout_review`,
+ * `software_dev`, `test_development`); prefer this for new conversational /
+ * LLM graphs as well.
  *
  * Direct `graph.invoke` / `stream` calls must pass `configurable.thread_id`
  * (see `threadConfig`). Agent Server / SDK runs use the thread created via
- * `POST /threads` / `client.threads.create()`.
+ * `POST /threads` / `client.threads.create()`. Specialists append durable
+ * notes (`reviewMemory` / `specialistNotes`) in finalize when the thread is
+ * reused.
  */
 export function compileWithMemory<TCompiled>(
   builder: { compile: (options?: CompileOpts) => TCompiled },

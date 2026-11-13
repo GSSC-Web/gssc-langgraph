@@ -6,11 +6,14 @@
  * Bun/TypeScript LangGraph — not a Dot Agents `.agents/` scaffold.
  *
  * Invoke via Agent Server assistant id `software_dev`, or `bun run software`.
+ * Compiled with MemorySaver (`compileWithMemory`): pass `configurable.thread_id`
+ * so `specialistNotes` accumulate across runs on the same thread.
  *
  * Naming note: sibling `test_dev` owns test-bot paths; this graph stays under
  * `software_dev` / `src/software/`.
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
+import { compileWithMemory } from "../../checkpoint/index.js";
 import {
   formatGssc5Context,
   loadGssc5ContextForRole,
@@ -29,6 +32,7 @@ import type {
   SoftwareCheckId,
   SoftwareFinding,
   SoftwareVerdict,
+  SpecialistNote,
 } from "../../software/types.js";
 
 const FindingAnnotation = Annotation<SoftwareFinding[]>({
@@ -43,6 +47,11 @@ const StepsAnnotation = Annotation<string[]>({
 
 const PlanAnnotation = Annotation<PlanStep[]>({
   reducer: (_left, right) => right ?? [],
+  default: () => [],
+});
+
+const SpecialistNotesAnnotation = Annotation<SpecialistNote[]>({
+  reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
   default: () => [],
 });
 
@@ -77,6 +86,8 @@ const SoftwareState = Annotation.Root({
   }),
   gssc5ContextText: Annotation<string>(),
   gssc5Root: Annotation<string>(),
+  /** Durable specialist notes across thread turns (append-only). */
+  specialistNotes: SpecialistNotesAnnotation,
   steps: StepsAnnotation,
 });
 
@@ -184,9 +195,18 @@ const finalize = async (
   const findings = state.findings ?? [];
   const plan = state.plan ?? [];
   const verdict = verdictFrom(findings);
+  const summary = summarize(verdict, findings, plan.length);
+  const note: SpecialistNote = {
+    at: new Date().toISOString(),
+    verdict,
+    summary,
+    label: state.changeSet?.label ?? state.label,
+    goal: (state.goal ?? "").trim() || undefined,
+  };
   return {
     verdict,
-    summary: summarize(verdict, findings, plan.length),
+    summary,
+    specialistNotes: [note],
     steps: ["verdict"],
   };
 };
@@ -213,5 +233,6 @@ const builder = new StateGraph(SoftwareState)
   .addEdge("check_third_party", "check_discipline")
   .addEdge("check_discipline", "finalize");
 
-export const graph = builder.compile();
-graph.name = "GSSC Software Dev";
+export const graph = compileWithMemory(builder, {
+  name: "GSSC Software Dev",
+});

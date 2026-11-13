@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { threadConfig } from "../src/checkpoint/index.js";
 import { graph as testDevGraph } from "../src/graphs/test_development/graph.js";
 import {
   mapCoverage,
@@ -11,21 +12,22 @@ import { collectWorkspace } from "../src/review/collect.js";
 import type { ChangeSet } from "../src/test_dev/types.js";
 
 describe("test_development graph", () => {
-  test("is compiled", () => {
+  test("is compiled with MemorySaver", () => {
     expect(testDevGraph).toBeDefined();
     expect(testDevGraph.name).toBe("GSSC Test Development");
   });
 
   test("invoke smoke — model-free", async () => {
-    const result = await testDevGraph.invoke({
-      label: "files",
-      files: {
-        "langgraph.json": JSON.stringify({
-          graphs: {
-            health: "./src/graphs/health/graph.ts:graph",
-          },
-        }),
-        "src/graphs/health/graph.ts": `
+    const result = await testDevGraph.invoke(
+      {
+        label: "files",
+        files: {
+          "langgraph.json": JSON.stringify({
+            graphs: {
+              health: "./src/graphs/health/graph.ts:graph",
+            },
+          }),
+          "src/graphs/health/graph.ts": `
 import { Annotation, StateGraph } from "@langchain/langgraph";
 const S = Annotation.Root({ status: Annotation<string>() });
 export const graph = new StateGraph(S)
@@ -34,7 +36,7 @@ export const graph = new StateGraph(S)
   .compile();
 graph.name = "GSSC Health";
 `,
-        "tests/graphs.test.ts": `
+          "tests/graphs.test.ts": `
 import { describe, expect, test } from "bun:test";
 import { graph as healthGraph } from "../src/graphs/health/graph.js";
 describe("health graph", () => {
@@ -46,28 +48,51 @@ describe("health graph", () => {
   });
 });
 `,
+        },
       },
-    });
+      threadConfig(`test-dev-smoke-${crypto.randomUUID()}`),
+    );
     expect(result.steps).toContain("verdict");
     expect(result.checksRun).toContain("coverage_map");
     expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);
+    expect(result.specialistNotes.length).toBe(1);
   });
 
   test("PASSes current workspace for baseline + tooling contracts", async () => {
     const cs = await collectWorkspace(process.cwd());
-    const result = await testDevGraph.invoke({
-      label: cs.label,
-      changeSet: cs,
-      files: Object.fromEntries(
-        cs.files
-          .filter((f) => f.content !== undefined)
-          .map((f) => [f.path, f.content!]),
-      ),
-    });
+    const result = await testDevGraph.invoke(
+      {
+        label: cs.label,
+        changeSet: cs,
+        files: Object.fromEntries(
+          cs.files
+            .filter((f) => f.content !== undefined)
+            .map((f) => [f.path, f.content!]),
+        ),
+      },
+      threadConfig(`test-dev-workspace-${crypto.randomUUID()}`),
+    );
     expect(result.verdict).toBe("PASS");
     expect(result.scopeGraphIds).toContain("health");
     expect(result.scopeGraphIds).toContain("test_development");
     expect(result.steps).toContain("verdict");
+    expect(result.specialistNotes[0]?.verdict).toBe("PASS");
+  });
+
+  test("appends specialistNotes across thread turns", async () => {
+    const config = threadConfig(`test-dev-mem-${crypto.randomUUID()}`);
+    const input = {
+      label: "files",
+      files: {
+        "langgraph.json": JSON.stringify({
+          graphs: { health: "./src/graphs/health/graph.ts:graph" },
+        }),
+      },
+    };
+    const first = await testDevGraph.invoke(input, config);
+    expect(first.specialistNotes.length).toBe(1);
+    const second = await testDevGraph.invoke(input, config);
+    expect(second.specialistNotes.length).toBe(2);
   });
 });
 
