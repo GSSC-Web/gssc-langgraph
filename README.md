@@ -192,11 +192,12 @@ Domain graphs can pull relevant [gssc5 Dot Agents](https://github.com/GSSC-Web/g
 
 | Concern | Default |
 | --- | --- |
-| Locator | `GSSC5_ROOT` env → else sibling checkout `../gssc5` |
+| Locator | `GSSC5_ROOT` (filesystem path) → sibling `../gssc5` → auto-clone into `GSSC5_CACHE_DIR` |
+| Remote | `GSSC5_REPO_URL` (default `https://github.com/GSSC-Web/gssc5.git`), ref `GSSC5_REF=master` |
 | Layout | `.agents/skills/<id>/SKILL.md`, `.agents/memories/<id>.md` |
 | Relevance | Keyword/tag scoring + role presets (`software` / `test`) + optional `requireSkills` |
-| Wired graphs | `software_dev`, `test_development` (not `health` / smoke assistants) |
-| Missing root | Node no-ops: empty `gssc5Context`, step still recorded |
+| Wired graphs | `software_dev`, `test_development` (not `health`) |
+| Missing / failed checkout | Empty `gssc5Context` + `note`; graph continues |
 
 Helpers live under `src/gssc5/` (`loadGssc5Context`, `createLoadGssc5ContextNode`). Per-invoke overrides: `configurable.gssc5Root`, `gssc5Enabled`, `preferSkills`, `requireSkills`, ….
 

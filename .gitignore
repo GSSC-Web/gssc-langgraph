@@ -24,3 +24,6 @@ Thumbs.db
 
 # LangGraph local server / CLI
 .langgraph_api/
+
+# Local gssc5 auto-checkout cache (if pointed inside the repo)
+.cache/

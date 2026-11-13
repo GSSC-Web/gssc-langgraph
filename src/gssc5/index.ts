@@ -1,10 +1,30 @@
 /**
  * gssc5 skills/memories loader for LangGraph graphs.
  *
- * Reads Dot Agents content from a local gssc5 checkout (see `resolveGssc5Root`).
- * Does not modify gssc5; this service only consumes `.agents/` as context.
+ * Reads Dot Agents content from a local gssc5 checkout, or clones/updates
+ * GSSC-Web/gssc5 into a cache dir (see `ensureGssc5Checkout`).
+ * Does not modify upstream gssc5 content; this service only consumes `.agents/`.
  */
-export { resolveGssc5Root, isGssc5Root, agentsDir } from "./root.js";
+export {
+  resolveGssc5Root,
+  isGssc5Root,
+  agentsDir,
+  looksLikeGitUrl,
+} from "./root.js";
+export {
+  ensureGssc5Checkout,
+  checkoutGssc5ToCache,
+  defaultGssc5CacheDir,
+  resolveGssc5RepoUrl,
+  resolveGssc5Ref,
+  DEFAULT_GSSC5_REPO_URL,
+  DEFAULT_GSSC5_REF,
+} from "./checkout.js";
+export type {
+  EnsureGssc5CheckoutOptions,
+  Gssc5CheckoutResult,
+  GitRunner,
+} from "./checkout.js";
 export { parseFrontmatter } from "./parse.js";
 export { listSkills, listMemories, loadDoc, loadDocs } from "./catalog.js";
 export { scoreDoc, selectAndLoad, tokenize } from "./select.js";

@@ -30,5 +30,6 @@ export {
   loadGssc5Context,
   loadGssc5ContextForRole,
   resolveGssc5Root,
+  ensureGssc5Checkout,
   formatGssc5Context,
 } from "./gssc5/index.js";

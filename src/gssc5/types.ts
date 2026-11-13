@@ -66,10 +66,24 @@ export interface SelectGssc5Options {
 }
 
 export interface LoadGssc5ContextOptions extends SelectGssc5Options {
-  /** Override root resolution (tests / explicit path). */
+  /**
+   * Explicit filesystem path to a gssc5 checkout (not a git URL).
+   * For a custom remote, set `repoUrl` / `GSSC5_REPO_URL` instead.
+   */
   root?: string;
   /** Skip filesystem work when false. Default true. */
   enabled?: boolean;
+  /**
+   * Clone/fetch gssc5 into a cache dir when no local root exists.
+   * Default true (disable with `GSSC5_AUTO_CHECKOUT=false`).
+   */
+  autoCheckout?: boolean;
+  /** Cache directory for auto-checkout (default: XDG/home `.cache/gssc-langgraph/gssc5-repo`). */
+  cacheDir?: string;
+  /** Git remote URL (default `https://github.com/GSSC-Web/gssc5.git`). */
+  repoUrl?: string;
+  /** Branch/tag/ref for auto-checkout (default `master`). */
+  ref?: string;
 }
 
 /** Role presets used by domain graphs. */

@@ -1,6 +1,6 @@
 # gssc5 skills / memories in LangGraph
 
-This service **consumes** [GSSC-Web/gssc5](https://github.com/GSSC-Web/gssc5) Dot Agents content as turn context. It does not scaffold a `.agents/` tree here and does not modify gssc5.
+This service **consumes** [GSSC-Web/gssc5](https://github.com/GSSC-Web/gssc5) Dot Agents content as turn context. It does not scaffold a `.agents/` tree here and does not modify upstream gssc5.
 
 ## Source layout (gssc5)
 
@@ -20,16 +20,27 @@ Agents load by **path**: guidelines first, then role profile, then skills/memori
 
 | Priority | Mechanism |
 | --- | --- |
-| 1 | Explicit `root` / `configurable.gssc5Root` (tests, Studio) |
-| 2 | `GSSC5_ROOT` environment variable (absolute or cwd-relative) |
-| 3 | Sibling checkout `../gssc5` next to this repo |
+| 1 | Explicit `root` / `configurable.gssc5Root` — **filesystem path only** |
+| 2 | `GSSC5_ROOT` — **filesystem path only** (not a URL) |
+| 3 | Sibling checkout `../gssc5` (or `./gssc5`) next to cwd |
+| 4 | Auto-checkout: shallow `git clone` / `git fetch` of `GSSC5_REPO_URL` into `GSSC5_CACHE_DIR` |
 
-HTTP / git-submodule fetch is **not** required for local/dev: point `GSSC5_ROOT` at a normal clone. If no root is found, loaders return an empty bundle with a `note` and graphs continue.
+`GSSC5_ROOT` is never treated as a remote. For a custom clone URL use `GSSC5_REPO_URL`.
 
 ```bash
-# .env
+# Prefer an existing local clone (path, not URL):
 GSSC5_ROOT=/path/to/gssc5
+
+# Or let the service clone/update into a cache dir:
+# GSSC5_CACHE_DIR=~/.cache/gssc-langgraph/gssc5-repo
+# GSSC5_REPO_URL=https://github.com/GSSC-Web/gssc5.git
+# GSSC5_REF=master
+# GSSC5_AUTO_CHECKOUT=true   # default; set false to disable network
 ```
+
+Default cache: `$XDG_CACHE_HOME/gssc-langgraph/gssc5-repo` (else `~/.cache/gssc-langgraph/gssc5-repo`). Checkout lands at `<cache>/gssc5`.
+
+If checkout fails (no git, offline, bad URL), loaders return an empty bundle with a `note` and graphs continue.
 
 ## API
 
@@ -38,10 +49,12 @@ import {
   loadGssc5Context,
   loadGssc5ContextForRole,
   createLoadGssc5ContextNode,
+  ensureGssc5Checkout,
   resolveGssc5Root,
 } from "../gssc5/index.js";
 ```
 
+- `ensureGssc5Checkout` — local path first, else clone/fetch into cache
 - `listSkills` / `listMemories` — catalog from `.agents/`
 - `selectAndLoad` — keyword + preference scoring, then read file bodies
 - `loadGssc5ContextForRole("software" | "test" | "general")` — role presets
@@ -75,4 +88,4 @@ Not wired: `health` (and other one-shot smoke / model-free checkers that do not 
 ## Tests
 
 Fixture checkout: `tests/fixtures/gssc5/.agents/…`  
-Suite: `tests/gssc5_context.test.ts` (`bun test`).
+Suite: `tests/gssc5_context.test.ts` (`bun test`) — auto-checkout covered with a mock `git` runner (no network).

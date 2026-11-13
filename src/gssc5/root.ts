@@ -1,15 +1,29 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+/** True when a value looks like a git remote URL (not a filesystem path). */
+export function looksLikeGitUrl(value: string): boolean {
+  const v = value.trim();
+  return (
+    /^https?:\/\//i.test(v) ||
+    /^git@/i.test(v) ||
+    /^ssh:\/\//i.test(v) ||
+    /^git:\/\//i.test(v) ||
+    v.endsWith(".git")
+  );
+}
+
 /**
- * Resolve the gssc5 checkout that owns `.agents/`.
+ * Resolve an **existing** gssc5 checkout that owns `.agents/` (no clone).
  *
  * Order:
- * 1. Explicit `override` argument
- * 2. `GSSC5_ROOT` env (absolute or cwd-relative)
- * 3. Sibling checkout `../gssc5` relative to this package root
+ * 1. Explicit `override` argument (filesystem path — not a URL)
+ * 2. `GSSC5_ROOT` env (filesystem path — not a URL)
+ * 3. Sibling checkout `../gssc5` relative to cwd
+ * 4. `./gssc5` under cwd
  *
- * Returns `""` when no usable root is found (graphs no-op gracefully).
+ * For clone/fetch into a cache dir, use `ensureGssc5Checkout`.
+ * Returns `""` when no usable local root is found.
  */
 export function resolveGssc5Root(
   override?: string,
@@ -18,15 +32,19 @@ export function resolveGssc5Root(
   const candidates: string[] = [];
 
   if (override?.trim()) {
+    if (looksLikeGitUrl(override)) return "";
     candidates.push(resolve(cwd, override.trim()));
   }
 
   const env = process.env.GSSC5_ROOT?.trim();
   if (env) {
-    candidates.push(resolve(cwd, env));
+    if (looksLikeGitUrl(env)) {
+      // Path-only env; URLs belong in GSSC5_REPO_URL.
+    } else {
+      candidates.push(resolve(cwd, env));
+    }
   }
 
-  // Package root when tests/CLI run from repo; also try cwd itself as langgraph root.
   candidates.push(resolve(cwd, "..", "gssc5"));
   candidates.push(resolve(cwd, "gssc5"));
 

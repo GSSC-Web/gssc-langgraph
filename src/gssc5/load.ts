@@ -1,4 +1,4 @@
-import { resolveGssc5Root } from "./root.js";
+import { ensureGssc5Checkout } from "./checkout.js";
 import { selectAndLoad } from "./select.js";
 import {
   ROLE_PRESETS,
@@ -23,7 +23,9 @@ export function emptyGssc5Context(
 
 /**
  * Load a relevance-filtered bundle of gssc5 skills + memories.
- * Safe when gssc5 is missing: returns an empty bundle with a note.
+ *
+ * Resolves an existing local checkout first; otherwise clones/updates
+ * GSSC-Web/gssc5 into a cache directory (see `ensureGssc5Checkout`).
  */
 export function loadGssc5Context(
   options: LoadGssc5ContextOptions = {},
@@ -33,22 +35,28 @@ export function loadGssc5Context(
     return emptyGssc5Context("disabled", query);
   }
 
-  const root = resolveGssc5Root(options.root);
-  if (!root) {
-    return emptyGssc5Context(
-      "gssc5 root not found (set GSSC5_ROOT or place a sibling ../gssc5 checkout)",
-      query,
-    );
+  const checkout = ensureGssc5Checkout({
+    root: options.root,
+    autoCheckout: options.autoCheckout,
+    cacheDir: options.cacheDir,
+    repoUrl: options.repoUrl,
+    ref: options.ref,
+  });
+
+  if (!checkout.root) {
+    return emptyGssc5Context(checkout.note, query);
   }
 
-  const { skills, memories, selected } = selectAndLoad(root, options);
+  const { skills, memories, selected } = selectAndLoad(checkout.root, options);
   const note =
     skills.length + memories.length === 0
-      ? "no skills/memories met the relevance threshold"
-      : `loaded ${skills.length} skill(s), ${memories.length} memor${memories.length === 1 ? "y" : "ies"} from ${root}`;
+      ? `no skills/memories met the relevance threshold (${checkout.note})`
+      : `loaded ${skills.length} skill(s), ${memories.length} memor${
+          memories.length === 1 ? "y" : "ies"
+        } from ${checkout.root} (${checkout.source})`;
 
   return {
-    root,
+    root: checkout.root,
     query,
     skills,
     memories,

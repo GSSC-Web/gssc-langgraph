@@ -1,17 +1,23 @@
 import { describe, expect, test } from "bun:test";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createLoadGssc5ContextNode,
+  checkoutGssc5ToCache,
+  ensureGssc5Checkout,
   formatGssc5Context,
   isGssc5Root,
   listMemories,
   listSkills,
   loadGssc5Context,
   loadGssc5ContextForRole,
+  looksLikeGitUrl,
   parseFrontmatter,
   resolveGssc5Root,
   selectAndLoad,
   tokenize,
+  type GitRunner,
 } from "../src/gssc5/index.js";
 import { graph as softwareGraph } from "../src/graphs/software_dev/graph.js";
 import { graph as testDevGraph } from "../src/graphs/test_development/graph.js";
@@ -35,6 +41,91 @@ describe("gssc5 root resolution", () => {
     } finally {
       if (prev !== undefined) process.env.GSSC5_ROOT = prev;
     }
+  });
+
+  test("GSSC5_ROOT must be a path, not a URL", () => {
+    expect(looksLikeGitUrl("https://github.com/GSSC-Web/gssc5.git")).toBe(true);
+    expect(looksLikeGitUrl("/abs/path/to/gssc5")).toBe(false);
+    expect(resolveGssc5Root("https://github.com/GSSC-Web/gssc5.git")).toBe("");
+  });
+});
+
+describe("gssc5 auto-checkout", () => {
+  test("ensureGssc5Checkout rejects URL in root override", () => {
+    const result = ensureGssc5Checkout({
+      root: "https://github.com/GSSC-Web/gssc5.git",
+      autoCheckout: false,
+    });
+    expect(result.root).toBe("");
+    expect(result.note).toContain("filesystem path");
+    expect(result.note).toContain("GSSC5_REPO_URL");
+  });
+
+  test("clones into cache when no local root (mock git)", () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "gssc5-cache-"));
+    const git: GitRunner = (args) => {
+      if (args[0] === "clone") {
+        const target = args[args.length - 1]!;
+        mkdirSync(target, { recursive: true });
+        cpSync(FIXTURE_ROOT, target, { recursive: true });
+        // Minimal .git so later isGitRepo checks can pass if re-run.
+        mkdirSync(join(target, ".git"), { recursive: true });
+        writeFileSync(join(target, ".git", "HEAD"), "ref: refs/heads/master\n");
+        return { status: 0, stdout: "", stderr: "" };
+      }
+      if (args[0] === "rev-parse") {
+        return { status: 0, stdout: "true\n", stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+
+    const prevRoot = process.env.GSSC5_ROOT;
+    delete process.env.GSSC5_ROOT;
+    try {
+      const result = ensureGssc5Checkout({
+        cacheDir,
+        autoCheckout: true,
+        git,
+        // Force miss on sibling by using a cwd without ../gssc5
+        cwd: cacheDir,
+      });
+      expect(result.source).toBe("cache");
+      expect(result.root).toBe(join(cacheDir, "gssc5"));
+      expect(isGssc5Root(result.root)).toBe(true);
+      expect(existsSync(join(result.root, ".agents", "skills"))).toBe(true);
+    } finally {
+      if (prevRoot !== undefined) process.env.GSSC5_ROOT = prevRoot;
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  test("updates existing cache checkout (mock fetch)", () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "gssc5-cache-upd-"));
+    const target = join(cacheDir, "gssc5");
+    cpSync(FIXTURE_ROOT, target, { recursive: true });
+    mkdirSync(join(target, ".git"), { recursive: true });
+    writeFileSync(join(target, ".git", "HEAD"), "ref: refs/heads/master\n");
+
+    const calls: string[][] = [];
+    const git: GitRunner = (args) => {
+      calls.push([...args]);
+      if (args[0] === "rev-parse") {
+        return { status: 0, stdout: "true\n", stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+
+    // Exercise cache update directly — ensureGssc5Checkout would classify
+    // <cache>/gssc5 as a local ./gssc5 sibling when cwd === cacheDir.
+    const result = checkoutGssc5ToCache({
+      cacheDir,
+      git,
+      cwd: cacheDir,
+    });
+    expect(result.root).toBe(target);
+    expect(result.source).toBe("cache");
+    expect(calls.some((c) => c[0] === "fetch")).toBe(true);
+    rmSync(cacheDir, { recursive: true, force: true });
   });
 });
 
@@ -126,6 +217,7 @@ describe("select / load relevance", () => {
     const bundle = loadGssc5Context({
       root: "/tmp/missing-gssc5-root",
       query: "anything",
+      autoCheckout: false,
     });
     expect(bundle.skills).toEqual([]);
     expect(bundle.note).toContain("not found");
