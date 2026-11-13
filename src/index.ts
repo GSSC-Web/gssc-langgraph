@@ -8,6 +8,8 @@
  *
  * Thread persistence helpers live under `./checkpoint` — conversational /
  * LLM graphs should `compileWithMemory` and pass `configurable.thread_id`.
+ *
+ * gssc5 Dot Agents skills/memories loaders live under `./gssc5`.
  */
 export { graph as healthGraph } from "./graphs/health/graph.js";
 export { graph as conversationGraph } from "./graphs/conversation/graph.js";
@@ -23,3 +25,10 @@ export {
   compileGraph,
   compileWithMemory,
 } from "./checkpoint/index.js";
+export {
+  createLoadGssc5ContextNode,
+  loadGssc5Context,
+  loadGssc5ContextForRole,
+  resolveGssc5Root,
+  formatGssc5Context,
+} from "./gssc5/index.js";

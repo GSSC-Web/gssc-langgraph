@@ -12,6 +12,11 @@
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
 import {
+  formatGssc5Context,
+  loadGssc5ContextForRole,
+  type Gssc5ContextBundle,
+} from "../../gssc5/index.js";
+import {
   CHECK_RUNNERS,
   summarize,
   verdictFrom,
@@ -65,6 +70,13 @@ const SoftwareState = Annotation.Root({
   }),
   verdict: Annotation<SoftwareVerdict | "">(),
   summary: Annotation<string>(),
+  /** gssc5 Dot Agents skills/memories pulled in for this turn (optional). */
+  gssc5Context: Annotation<Gssc5ContextBundle | null>({
+    reducer: (_left, right) => right ?? null,
+    default: () => null,
+  }),
+  gssc5ContextText: Annotation<string>(),
+  gssc5Root: Annotation<string>(),
   steps: StepsAnnotation,
 });
 
@@ -116,6 +128,27 @@ const parseInput = async (
   };
 };
 
+const loadGssc5Context = async (
+  state: typeof SoftwareState.State,
+  config?: { configurable?: { gssc5Root?: string; gssc5Enabled?: boolean } },
+): Promise<typeof SoftwareState.Update> => {
+  const query = [state.goal, state.requirements].filter(Boolean).join("\n");
+  const bundle = loadGssc5ContextForRole("software", {
+    query,
+    root: config?.configurable?.gssc5Root,
+    enabled: config?.configurable?.gssc5Enabled,
+    requireSkills: ["software-closeout-review"],
+    maxSkills: 3,
+    maxMemories: 2,
+  });
+  return {
+    gssc5Context: bundle,
+    gssc5ContextText: formatGssc5Context(bundle),
+    gssc5Root: bundle.root,
+    steps: ["load_gssc5_context"],
+  };
+};
+
 const planWork = async (
   state: typeof SoftwareState.State,
 ): Promise<typeof SoftwareState.Update> => {
@@ -160,6 +193,7 @@ const finalize = async (
 
 const builder = new StateGraph(SoftwareState)
   .addNode("parse_input", parseInput)
+  .addNode("load_gssc5_context", loadGssc5Context)
   .addNode("plan_work", planWork)
   .addNode("check_scope", makeCheckNode("scope"))
   .addNode("check_trace", makeCheckNode("trace"))
@@ -169,7 +203,8 @@ const builder = new StateGraph(SoftwareState)
   .addNode("check_discipline", makeCheckNode("discipline"))
   .addNode("finalize", finalize)
   .addEdge("__start__", "parse_input")
-  .addEdge("parse_input", "plan_work")
+  .addEdge("parse_input", "load_gssc5_context")
+  .addEdge("load_gssc5_context", "plan_work")
   .addEdge("plan_work", "check_scope")
   .addEdge("check_scope", "check_trace")
   .addEdge("check_trace", "check_match")
