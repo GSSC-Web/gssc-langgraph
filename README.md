@@ -8,6 +8,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 | --- | --- |
 | Runtime | **TypeScript + Bun** (`packageManager: bun`), LangGraph.js — not Python |
 | Serving | Official **Agent Server** via `@langchain/langgraph-cli` (`bun run dev`) — no custom HTTP framework |
+| LLM (domain graphs) | **xAI / Grok** via `@langchain/xai` `ChatXAI` (`createChatModel()` in `src/llm`) — default model `grok-4.7` |
 | Auth (local) | **None** for local CLI serve (loopback). Production: LangSmith / custom `langgraph.json` `auth` later |
 | CORS | Prefer **gssc5 backend → this service** (server-side). Browser CORS not required for that pattern |
 | Default URL | `http://127.0.0.1:2024` (`langgraph-cli dev` default) |
@@ -23,6 +24,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── tsconfig.json
 ├── .env.example
 ├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
+├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
 ├── src/graphs/
 │   ├── health/graph.ts         # assistant id: health
 │   ├── sample_agent/graph.ts   # assistant id: sample_agent
@@ -31,7 +33,44 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 └── tests/
 ```
 
-Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`.
+Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`. Prefer `createChatModel()` from `src/llm` when a graph needs an LLM (xAI by default).
+
+## LLM provider (xAI)
+
+Domain graphs that call a chat model should use the shared helper:
+
+```ts
+import { createChatModel } from "../llm/index.js";
+// or: import { createChatModel } from "../../index.js";
+
+const llm = createChatModel({ temperature: 0 });
+// optional: createChatModel({ model: "grok-4.6" })
+```
+
+| Concern | Default |
+| --- | --- |
+| Provider | xAI (`ChatXAI` from `@langchain/xai`) |
+| Model id | `grok-4.7` (xAI’s current general / agentic recommendation) |
+| API key env | `XAI_API_KEY` |
+| Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
+
+Smoke assistants (`health`, `sample_agent`, `service_review`) remain **model-free** so `bun run dev` / CI work without provider keys.
+
+### Breaking / migration notes
+
+- No change to existing assistant ids or smoke-graph I/O.
+- New dependency: `@langchain/xai`.
+- Domain graphs that previously would have used OpenAI/Anthropic should call `createChatModel()` (or pass an explicit provider) instead of hard-coding `ChatOpenAI` / `ChatAnthropic`.
+- Set `XAI_API_KEY` before invoking any graph that uses the helper.
+
+### LangSmith tracing + “model of choice” (manual UI)
+
+In-repo defaults cover **code** (`ChatXAI` + env). LangSmith’s workspace **Default Model** for Playground / Evaluators / Chat / Insights is configured in the dashboard and cannot live in this repo:
+
+1. Add a workspace secret named `XAI_API_KEY` under **Settings → Integrations → Provider secrets** (provider: xAI).
+2. Open **Settings → Model configurations**, create a configuration with **Provider: xAI**, model **`grok-4.7`** (or your override), API key name `XAI_API_KEY`.
+3. In the **Feature Access** table, enable **xAI** for the features you use and set **Default Model** to that configuration.
+4. For local/Agent Server traces: set `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, and `LANGSMITH_PROJECT` in `.env` (see `.env.example`). Traces from `ChatXAI` report `ls_provider=xai` and the selected model id.
 
 ## Service review workflow
 
@@ -100,7 +139,8 @@ Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.j
 ```bash
 bun install          # or: mise run install
 cp .env.example .env
-# optional: set LANGSMITH_API_KEY for tracing / Studio
+# optional: LANGSMITH_API_KEY (+ LANGSMITH_TRACING=true) for tracing / Studio
+# for domain LLM graphs: set XAI_API_KEY (smoke graphs do not need it)
 
 bun run dev          # or: mise run dev
 ```
@@ -219,3 +259,6 @@ Official references:
 - [Local server (JS)](https://docs.langchain.com/oss/javascript/langgraph/local-server)
 - [Application structure](https://docs.langchain.com/langsmith/setup-javascript)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
+- [ChatXAI (xAI / Grok)](https://docs.langchain.com/oss/javascript/integrations/chat/xai)
+- [LangSmith model configurations](https://docs.langchain.com/langsmith/model-configurations)
+- [xAI models](https://docs.x.ai/docs/models)
