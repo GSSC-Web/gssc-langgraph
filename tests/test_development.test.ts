@@ -53,8 +53,11 @@ describe("health graph", () => {
       threadConfig(`test-dev-smoke-${crypto.randomUUID()}`),
     );
     expect(result.steps).toContain("verdict");
+    expect(result.steps).toContain("synthesize");
     expect(result.checksRun).toContain("coverage_map");
     expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);
+    expect(result.synthesisNote).toMatch(/^(ok|skipped:|error:)/);
+    expect(typeof result.narrativeSummary).toBe("string");
     expect(result.specialistNotes.length).toBe(1);
   });
 
@@ -76,6 +79,8 @@ describe("health graph", () => {
     expect(result.scopeGraphIds).toContain("health");
     expect(result.scopeGraphIds).toContain("test_development");
     expect(result.steps).toContain("verdict");
+    expect(result.steps).toContain("synthesize");
+    expect(result.synthesisNote).toMatch(/^(ok|skipped:|error:)/);
     expect(result.specialistNotes[0]?.verdict).toBe("PASS");
   });
 

@@ -169,6 +169,40 @@ enabled: true
     ]);
     expect(ROLE_PRESETS.reviewer.preferMemories).toEqual([...ARCH_MEMORY_IDS]);
   });
+
+  test("temp GSSC5_ROOT fixture: reviewer preset loads three closeout skills", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "gssc5-root-reviewer-"));
+    cpSync(FIXTURE_ROOT, tempRoot, { recursive: true });
+    const prevRoot = process.env.GSSC5_ROOT;
+    process.env.GSSC5_ROOT = tempRoot;
+    try {
+      expect(isGssc5Root(tempRoot)).toBe(true);
+      const bundle = loadGssc5ContextForRole("reviewer", {
+        query: "closeout review requirements software test",
+        // Prefer env GSSC5_ROOT (no explicit root) once checkout succeeds.
+        requireSkills: [...CLOSEOUT_PEER_SKILL_IDS],
+        requireMemories: [...ARCH_MEMORY_IDS],
+        maxSkills: 3,
+        maxMemories: 3,
+        autoCheckout: false,
+      });
+      expect(bundle.root).toBe(tempRoot);
+      expect(bundle.note).not.toMatch(/not found/i);
+      for (const id of CLOSEOUT_PEER_SKILL_IDS) {
+        expect(bundle.skills.some((s) => s.id === id)).toBe(true);
+      }
+      for (const id of ARCH_MEMORY_IDS) {
+        expect(bundle.memories.some((m) => m.id === id)).toBe(true);
+      }
+      expect(formatGssc5Context(bundle)).toContain(
+        "## Skill: requirements-closeout-review",
+      );
+    } finally {
+      if (prevRoot !== undefined) process.env.GSSC5_ROOT = prevRoot;
+      else delete process.env.GSSC5_ROOT;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("select / load relevance", () => {

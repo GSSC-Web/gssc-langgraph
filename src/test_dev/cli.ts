@@ -74,8 +74,9 @@ function parseArgs(argv: string[]): Args {
 function printHelp(): void {
   console.log(`gssc-langgraph test development
 
-Run the agentic test_development LangGraph (model-free) to map contracts →
-permanent bun:test coverage, propose a plan, and optionally run focused tests.
+Run the agentic test_development LangGraph (model-free analysis; optional LLM
+synthesis when XAI_API_KEY is set) to map contracts → permanent bun:test
+coverage, propose a plan, and optionally run focused tests.
 
 Behavioral reference: gssc5 test agent / test-closeout-review (not a .agents scaffold).
 
@@ -122,6 +123,11 @@ async function runTestDev(cs: ChangeSet): Promise<{
   commands: string[];
   steps: string[];
   specialistNotes: SpecialistNote[];
+  narrativeSummary: string;
+  proposedMemoryUpdates: unknown[];
+  synthesisNote: string;
+  gssc5Root: string;
+  gssc5Note: string;
 }> {
   const files: Record<string, string> = {};
   const fileStatuses: Record<
@@ -158,6 +164,11 @@ async function runTestDev(cs: ChangeSet): Promise<{
     commands: result.commands ?? [],
     steps: result.steps ?? [],
     specialistNotes: result.specialistNotes ?? [],
+    narrativeSummary: result.narrativeSummary || result.summary || verdict,
+    proposedMemoryUpdates: result.proposedMemoryUpdates ?? [],
+    synthesisNote: result.synthesisNote || "",
+    gssc5Root: result.gssc5Root || "",
+    gssc5Note: result.gssc5Context?.note || "",
   };
 }
 
@@ -222,6 +233,9 @@ async function main(): Promise<void> {
         {
           verdict: report.verdict,
           summary: report.summary,
+          narrativeSummary: report.narrativeSummary,
+          proposedMemoryUpdates: report.proposedMemoryUpdates,
+          synthesisNote: report.synthesisNote,
           label: cs.label,
           scopeGraphIds: report.scopeGraphIds,
           checksRun: report.checksRun,
@@ -231,6 +245,8 @@ async function main(): Promise<void> {
           commands: report.commands,
           specialistNotes: report.specialistNotes,
           steps: report.steps,
+          gssc5Root: report.gssc5Root,
+          gssc5Note: report.gssc5Note,
         },
         null,
         2,
@@ -239,6 +255,9 @@ async function main(): Promise<void> {
   } else {
     console.log(`test_development — ${cs.label}`);
     console.log(report.summary);
+    if (report.synthesisNote) {
+      console.log(`synthesis: ${report.synthesisNote}`);
+    }
     console.log(
       `scope: ${report.scopeGraphIds.join(", ") || "(none)"}`,
     );

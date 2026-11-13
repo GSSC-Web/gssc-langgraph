@@ -62,7 +62,7 @@ const llm = createChatModel({ temperature: 0 });
 | API key env | `XAI_API_KEY` |
 | Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-Smoke/tooling assistants (`health`, `conversation`, `software_dev`, `test_development`) remain **model-free** so `bun run dev` / CI work without provider keys. `closeout_review` checks are model-free and skip optional synthesis when `XAI_API_KEY` is unset.
+Smoke assistants (`health`, `conversation`) remain **model-free**. Specialist bots (`closeout_review`, `software_dev`, `test_development`) keep deterministic plan/checks model-free and skip optional synthesis when `XAI_API_KEY` is unset.
 
 ### Breaking / migration notes
 
@@ -82,9 +82,13 @@ In-repo defaults cover **code** (`ChatXAI` + env). LangSmith’s workspace **Def
 
 ## Software development bot
 
-Runnable agentic software workflow (LangGraph graph + CLI). Behavioral reference: [gssc5 software agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/software/agent.md) and [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md) (scope → implement → third-party-first → PASS/FAIL, no silent contract rewrites) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
+Runnable agentic software workflow (LangGraph graph + CLI). Behavioral reference: [gssc5 software agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/software/agent.md) and [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md) (scope → implement → third-party-first → PASS/FAIL, no silent contract rewrites) — implemented here as a Bun/TypeScript workflow with **model-free plan + checks**, not a Dot Agents `.agents/` scaffold.
 
 The sibling **test** development bot is a separate assistant (`test_development` / `src/test_dev/`); this bot owns `software_dev` / `src/software/` only.
+
+**Optional synthesis:** after `verdict`, a `synthesize` node may call `createChatModel()` for a short NL `narrativeSummary` + advisory `proposedMemoryUpdates`. Without `XAI_API_KEY` the node skips (`synthesisNote: skipped: no XAI_API_KEY`) and the graph still returns a verdict + plan.
+
+Full I/O contract: [docs/software-dev-contract.md](docs/software-dev-contract.md).
 
 ### What it does
 
@@ -100,7 +104,7 @@ The sibling **test** development bot is a separate assistant (`test_development`
 | `third_party` | LangGraph.js / Bun / langgraph-cli over reinvented HTTP or Python |
 | `discipline` | No silent baseline/contract drops; no deleting covering tests to “fix” SW |
 
-**Output:** `verdict: PASS|FAIL`, `summary`, `plan[]`, and `findings[]`.
+**Output:** `verdict: PASS|FAIL`, `summary`, `plan[]`, `findings[]`, plus optional `narrativeSummary` / `proposedMemoryUpdates` / `synthesisNote`.
 
 ### Trigger locally
 
@@ -203,9 +207,13 @@ Prefer `bun run closeout` for git-aware PR/diff collection; the assistant accept
 
 ## Test development workflow
 
-Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
+Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a Bun/TypeScript workflow with **model-free analysis**, not a Dot Agents `.agents/` scaffold.
 
 Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health API + structural contracts for other registered graphs).
+
+**Optional synthesis:** after `verdict`, a `synthesize` node may call `createChatModel()` for a short NL `narrativeSummary` + advisory `proposedMemoryUpdates`. Without `XAI_API_KEY` the node skips and the graph still returns a verdict + plan.
+
+Full I/O contract: [docs/test-development-contract.md](docs/test-development-contract.md).
 
 ### What it does
 
@@ -217,7 +225,7 @@ Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseli
 | `asserts` | Behavior from the contract verb; flag weak/empty expects |
 | `timing` | Prefer focused `bun test <file>` commands |
 
-**Output:** `verdict: PASS|FAIL`, `summary`, `findings[]`, `coverage[]`, a development `plan[]` (add/update tests, suggested stubs), and `commands[]` for focused runs.
+**Output:** `verdict: PASS|FAIL`, `summary`, `findings[]`, `coverage[]`, a development `plan[]` (add/update tests, suggested stubs), `commands[]` for focused runs, plus optional `narrativeSummary` / `proposedMemoryUpdates` / `synthesisNote`.
 
 ### Trigger locally
 
@@ -271,7 +279,7 @@ Helpers live under `src/gssc5/` (`loadGssc5Context`, `createLoadGssc5ContextNode
 
 `closeout_review` uses the **`reviewer`** preset: hard-requires the three peer closeout skills (`requirements-closeout-review`, `software-closeout-review`, `test-closeout-review`) and architecture memories (`backend-arch`, `public-arch`, `members-arch`) on every run.
 
-See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md) and [docs/closeout-review-contract.md](docs/closeout-review-contract.md).
+See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md), [docs/closeout-review-contract.md](docs/closeout-review-contract.md), [docs/software-dev-contract.md](docs/software-dev-contract.md), and [docs/test-development-contract.md](docs/test-development-contract.md).
 
 ## Registered graphs
 
@@ -280,8 +288,8 @@ See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md) and [docs/clo
 | `health` | Smoke / liveness payload via the same runs API (baseline contract) | none (one-shot) |
 | `conversation` | Model-free multi-turn echo demo (thread persistence) | **MemorySaver** |
 | `closeout_review` | Closeout review (gssc5 reviewer context + optional LLM synthesis) | **MemorySaver** (`reviewMemory`) |
-| `test_development` | Model-free test-development workflow (contracts → plan / closeout) | **MemorySaver** (`specialistNotes`) |
-| `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | **MemorySaver** (`specialistNotes`) |
+| `test_development` | Test-development workflow (contracts → plan / closeout + optional synthesis) | **MemorySaver** (`specialistNotes`) |
+| `software_dev` | Software plan + closeout (gssc5 software-agent spirit + optional synthesis) | **MemorySaver** (`specialistNotes`) |
 
 The Agent Server also exposes HTTP `GET /ok` for process health.
 

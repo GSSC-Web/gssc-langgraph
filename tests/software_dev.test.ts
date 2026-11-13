@@ -49,6 +49,9 @@ describe("software_dev graph", () => {
     expect(result.checksRun).toContain("scope");
     expect(result.checksRun).toContain("discipline");
     expect(result.steps).toContain("verdict");
+    expect(result.steps).toContain("synthesize");
+    expect(result.synthesisNote).toMatch(/^(ok|skipped:|error:)/);
+    expect(typeof result.narrativeSummary).toBe("string");
     expect(result.specialistNotes.length).toBe(1);
     expect(result.specialistNotes[0]?.verdict).toBe("PASS");
   });
@@ -63,6 +66,8 @@ describe("software_dev graph", () => {
     expect(result.verdict).toBe("PASS");
     expect(result.plan.some((s) => s.id === "scaffold_graph")).toBe(true);
     expect(result.plan.some((s) => s.id === "closeout")).toBe(true);
+    expect(result.steps).toContain("synthesize");
+    expect(result.synthesisNote).toMatch(/^(ok|skipped:|error:)/);
     expect(result.specialistNotes.length).toBe(1);
   });
 

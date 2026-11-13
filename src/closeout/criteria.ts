@@ -96,14 +96,13 @@ export const BASELINE_ASSISTANT_IDS = ["health"] as const;
 
 /**
  * Smoke / tooling assistants that must remain model-free when present.
- * `closeout_review` is excluded: deterministic checks stay model-free, but an
- * optional `synthesize` node may call `createChatModel` when a key is set.
+ * Specialist bots with optional `synthesize` nodes (`closeout_review`,
+ * `software_dev`, `test_development`) are excluded: deterministic work stays
+ * model-free, but synthesis may call `createChatModel` when a key is set.
  */
 export const MODEL_FREE_ASSISTANT_IDS = [
   "health",
   "conversation",
-  "software_dev",
-  "test_development",
 ] as const;
 
 /** Paths / imports that imply reinventing the Agent Server. */

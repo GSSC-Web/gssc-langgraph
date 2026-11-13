@@ -91,3 +91,24 @@ export type SpecialistNote = {
   summary: string;
   label?: string;
 };
+
+/** Proposed gssc5 memory update from optional LLM synthesis (advisory only). */
+export type ProposedMemoryUpdate = {
+  /** Target memory id (e.g. `backend-arch`) or `new:<slug>`. */
+  memoryId: string;
+  /** Short proposed text / bullet to add or revise. */
+  summary: string;
+  rationale?: string;
+};
+
+export type TestDevSynthesis = {
+  /** Short natural-language summary for humans / Cursor agents. */
+  narrativeSummary: string;
+  /** Suggested memory edits — never applied automatically. */
+  proposedMemoryUpdates: ProposedMemoryUpdate[];
+  /**
+   * Why synthesis ran or was skipped
+   * (`ok`, `skipped: no XAI_API_KEY`, `skipped: disabled`, `error: …`).
+   */
+  note: string;
+};
