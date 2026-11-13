@@ -96,7 +96,7 @@ import {
 | `test_development` | `test` | After `parse_changeset`; requires `test-closeout-review`; query from label + paths; `compileWithMemory` + append-only `specialistNotes` |
 | `closeout_review` | `reviewer` | After `parse_changeset`; `requireSkills` = all three peer closeout skills; `requireMemories` = arch trio every run; `compileWithMemory` + append-only `reviewMemory` |
 
-These specialists can run with Agent Server / SDK threads so prior `specialistNotes` / `reviewMemory` persist for the `thread_id`. Pass `configurable.thread_id` (or create a thread) — CLI one-shots mint a fresh id per run.
+These specialists can run with Agent Server / SDK threads so prior `specialistNotes` / `reviewMemory` persist for the `thread_id`. Pass `configurable.thread_id` (or create a thread) — CLI one-shots mint a fresh id per run. Default checkpointer is in-process MemorySaver; set `GSSC_CHECKPOINT_BACKEND=sqlite|postgres` so notes survive Agent Server restarts.
 
 Not wired for gssc5 context: `health` / `conversation` (smoke assistants that do not need Dot Agents text).
 

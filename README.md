@@ -26,14 +26,14 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
 ├── src/auth/                   # Agent Server API-key / Bearer auth handler
 ├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
-├── src/checkpoint/             # MemorySaver + compileWithMemory / threadConfig
+├── src/checkpoint/             # MemorySaver (default) / Sqlite / Postgres + compileWithMemory
 ├── src/gssc5/                  # load/select gssc5 `.agents` skills + memories
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
-│   ├── conversation/graph.ts        # assistant id: conversation (MemorySaver)
-│   ├── closeout_review/graph.ts     # assistant id: closeout_review (MemorySaver)
-│   ├── test_development/graph.ts    # assistant id: test_development (MemorySaver)
-│   └── software_dev/graph.ts        # assistant id: software_dev (MemorySaver)
+│   ├── conversation/graph.ts        # assistant id: conversation (checkpointer)
+│   ├── closeout_review/graph.ts     # assistant id: closeout_review (checkpointer)
+│   ├── test_development/graph.ts    # assistant id: test_development (checkpointer)
+│   └── software_dev/graph.ts        # assistant id: software_dev (checkpointer)
 ├── src/review/                 # shared change-set collectors for tooling CLIs
 ├── src/closeout/               # closeout_review criteria, checks, CLI
 ├── src/test_dev/               # test-development contracts, analyzers, CLI
@@ -122,10 +122,11 @@ Default git base is `origin/master`. Exit `0` on PASS, `1` on FAIL.
 
 ### Trigger via Agent Server
 
-With `bun run dev`, call assistant `software_dev`:
+With `bun run dev`, call assistant `software_dev` (add `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` or `x-api-key` when the key is configured):
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "assistant_id": "software_dev",
@@ -183,10 +184,11 @@ Exit `0` on PASS, `1` on FAIL.
 
 ### Trigger via Agent Server
 
-With `bun run dev`, call assistant `closeout_review`:
+With `bun run dev`, call assistant `closeout_review` (Bearer / `x-api-key` when `GSSC_LANGGRAPH_API_KEY` is set):
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "assistant_id": "closeout_review",
@@ -244,10 +246,11 @@ Exit `0` on PASS, `1` on FAIL.
 
 ### Trigger via Agent Server
 
-With `bun run dev`, call assistant `test_development`:
+With `bun run dev`, call assistant `test_development` (Bearer / `x-api-key` when `GSSC_LANGGRAPH_API_KEY` is set):
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "assistant_id": "test_development",
@@ -286,16 +289,22 @@ See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md), [docs/closeo
 | Assistant id | Purpose | Checkpointer |
 | --- | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API (baseline contract) | none (one-shot) |
-| `conversation` | Model-free multi-turn echo demo (thread persistence) | **MemorySaver** |
-| `closeout_review` | Closeout review (gssc5 reviewer context + optional LLM synthesis) | **MemorySaver** (`reviewMemory`) |
-| `test_development` | Test-development workflow (contracts → plan / closeout + optional synthesis) | **MemorySaver** (`specialistNotes`) |
-| `software_dev` | Software plan + closeout (gssc5 software-agent spirit + optional synthesis) | **MemorySaver** (`specialistNotes`) |
+| `conversation` | Model-free multi-turn echo demo (thread persistence) | env-selected (default **MemorySaver**) |
+| `closeout_review` | Closeout review (gssc5 reviewer context + optional LLM synthesis) | env-selected (`reviewMemory`) |
+| `test_development` | Test-development workflow (contracts → plan / closeout + optional synthesis) | env-selected (`specialistNotes`) |
+| `software_dev` | Software plan + closeout (gssc5 software-agent spirit + optional synthesis) | env-selected (`specialistNotes`) |
 
 The Agent Server also exposes HTTP `GET /ok` for process health.
 
-## Threads + MemorySaver (short-term memory)
+## Threads + checkpointer (short-term / durable memory)
 
-Assistants compiled with a checkpointer persist graph state **per thread**. This service uses LangGraph’s in-process [`MemorySaver`](https://docs.langchain.com/oss/javascript/langgraph/add-memory) for local/dev:
+Assistants compiled with a checkpointer persist graph state **per thread**. `compileWithMemory` attaches the process-shared saver selected by env:
+
+| `GSSC_CHECKPOINT_BACKEND` | Saver | Survives restart? |
+| --- | --- | --- |
+| unset / `memory` (default) | In-process [`MemorySaver`](https://docs.langchain.com/oss/javascript/langgraph/add-memory) | No — correct for local `bun run dev` without extra setup |
+| `sqlite` | [`SqliteSaver`](https://www.npmjs.com/package/@langchain/langgraph-checkpoint-sqlite) (`better-sqlite3`) via `GSSC_CHECKPOINT_SQLITE_PATH` (default `.data/langgraph-checkpoints.sqlite`) | Yes (single node). Runs on the **Node** Agent Server spawned by `langgraph-cli` — not inside the Bun test runtime |
+| `postgres` | [`PostgresSaver`](https://www.npmjs.com/package/@langchain/langgraph-checkpoint-postgres) via `GSSC_CHECKPOINT_POSTGRES_URL` (+ optional `GSSC_CHECKPOINT_POSTGRES_SCHEMA`) | Yes (shared DB) |
 
 ```ts
 import { compileWithMemory, threadConfig } from "./checkpoint/index.js";
@@ -316,23 +325,29 @@ Domain specialist graphs (`closeout_review`, `software_dev`, `test_development`)
 | `software_dev` | `specialistNotes` | `finalize` (verdict + summary + goal/label) |
 | `test_development` | `specialistNotes` | `finalize` (verdict + summary + label) |
 
-CLI one-shots (`bun run closeout` / `software` / `test-dev`) mint a fresh `thread_id` per process. For multi-turn specialist memory over Agent Server / SDK, create a thread and reuse it.
+CLI one-shots (`bun run closeout` / `software` / `test-dev`) mint a fresh `thread_id` per process. For multi-turn specialist memory over Agent Server / SDK, create a thread and reuse it. With `sqlite` or `postgres`, those notes survive Agent Server restarts for the same `thread_id`.
 
 | Concern | Detail |
 | --- | --- |
 | Which graphs | `conversation` plus specialists `closeout_review`, `software_dev`, `test_development` via `compileWithMemory`; new conversational / LLM graphs should opt in the same way |
 | One-shot bots | `health` stays on `builder.compile()` (no checkpointer / no `thread_id` required) |
-| Persistence scope | **In-process** — lost on Agent Server restart. Fine for local `bun run dev` |
-| Production follow-up | Swap to a durable saver (e.g. Postgres / SQLite checkpointer) when multi-replica or restart-safe memory is required — not blocking this setup |
+| Local default | **MemorySaver** — lost on restart; zero-config for `bun run dev` |
+| Durable | Set `GSSC_CHECKPOINT_BACKEND=sqlite` or `postgres` (see `.env.example`) |
 | Agent Server threads | Create a thread, then stream runs with that `thread_id` (SDK or REST below) |
 
 ### Invoke with a thread (SDK)
 
+When `GSSC_LANGGRAPH_API_KEY` is set, pass `Authorization: Bearer …` (or `x-api-key`). Local bypass needs no header.
+
 ```ts
 import { Client } from "@langchain/langgraph-sdk";
 
+const apiKey = process.env.GSSC_LANGGRAPH_API_KEY;
 const client = new Client({
   apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
+  ...(apiKey
+    ? { defaultHeaders: { Authorization: `Bearer ${apiKey}` } }
+    : {}),
 });
 
 const thread = await client.threads.create();
@@ -358,10 +373,16 @@ await client.runs.wait(closeoutThread.thread_id, "closeout_review", {
 ### Invoke with a thread (Agent Server REST)
 
 ```bash
+# Optional when GSSC_LANGGRAPH_API_KEY is set (local bypass: omit AUTH_HEADER):
+AUTH_HEADER=(-H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY")
+# or: AUTH_HEADER=(-H "x-api-key: $GSSC_LANGGRAPH_API_KEY")
+
 THREAD_ID=$(curl -s -X POST http://127.0.0.1:2024/threads \
+  "${AUTH_HEADER[@]}" \
   -H 'Content-Type: application/json' -d '{}' | jq -r .thread_id)
 
 curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
+  "${AUTH_HEADER[@]}" \
   -H 'Content-Type: application/json' \
   -d '{
     "assistant_id": "conversation",
@@ -369,7 +390,7 @@ curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
   }'
 ```
 
-Pass the same `THREAD_ID` on later runs to continue the conversation or to grow specialist `reviewMemory` / `specialistNotes`. Omit the thread (threadless `POST /runs/stream`) only for graphs without a checkpointer such as `health` — MemorySaver graphs require a `thread_id`.
+Pass the same `THREAD_ID` on later runs to continue the conversation or to grow specialist `reviewMemory` / `specialistNotes`. Omit the thread (threadless `POST /runs/stream`) only for graphs without a checkpointer such as `health` — checkpointer graphs require a `thread_id`.
 
 ## Run locally (Bun)
 
@@ -431,9 +452,15 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:2024/runs/stre
   -d '{ "assistant_id": "health", "input": {} }'
 # → 401
 
-# Accepted:
+# Accepted (Bearer):
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
   -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{ "assistant_id": "health", "input": {} }'
+
+# Accepted (x-api-key):
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "x-api-key: $GSSC_LANGGRAPH_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{ "assistant_id": "health", "input": {} }'
 ```
@@ -473,14 +500,20 @@ bun add @langchain/langgraph-sdk
 ```ts
 import { Client } from "@langchain/langgraph-sdk";
 
+const apiKey = process.env.GSSC_LANGGRAPH_API_KEY;
 const client = new Client({
   apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
+  // Required when GSSC_LANGGRAPH_API_KEY is set on the server (local bypass: omit).
+  ...(apiKey
+    ? { defaultHeaders: { Authorization: `Bearer ${apiKey}` } }
+    : {}),
+  // Alternative: defaultHeaders: { "x-api-key": apiKey },
 });
 
 // Threadless health check via the health assistant
 const healthStream = client.runs.stream(null, "health", { input: {} });
 
-// Conversation assistant with a thread (MemorySaver persists state for this thread_id)
+// Conversation assistant with a thread (checkpointer persists state for this thread_id)
 const thread = await client.threads.create();
 const runStream = client.runs.stream(thread.thread_id, "conversation", {
   input: { message: "hello from gssc5" },
@@ -490,10 +523,13 @@ const runStream = client.runs.stream(thread.thread_id, "conversation", {
 
 ### Option B — REST (threads + runs)
 
+When the API key is configured, every Agent Server call below (except `GET /ok`) needs `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` or `x-api-key: $GSSC_LANGGRAPH_API_KEY`. Local `bun run dev` with an empty key skips these headers.
+
 Create a thread:
 
 ```bash
 curl -s -X POST http://127.0.0.1:2024/threads \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
@@ -502,11 +538,15 @@ Stream a run (threadless) — health assistant:
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{ "assistant_id": "health", "input": {} }'
+
+# Equivalent with x-api-key:
+#   -H "x-api-key: $GSSC_LANGGRAPH_API_KEY"
 ```
 
-Process liveness:
+Process liveness (no API key required):
 
 ```bash
 curl -s http://127.0.0.1:2024/ok
@@ -521,7 +561,8 @@ curl -s http://127.0.0.1:2024/ok
 | Stateless | `POST /runs/stream` with `thread_id` omitted / SDK `null` |
 | Stateful | `POST /threads` then `threads/{id}/runs/stream` (or SDK `runs.stream(thread_id, …)`); graphs compiled with `compileWithMemory` load prior checkpoints |
 | Input shape | Per-graph; health accepts `{}`; `conversation` expects `{ "message": string }`; specialists accept their usual inputs and append `reviewMemory` / `specialistNotes` when threaded |
-| Checkpointer (local) | In-process `MemorySaver` on `conversation`, `closeout_review`, `software_dev`, `test_development` (and future conversational / LLM graphs via `compileWithMemory`) |
+| Checkpointer (default) | In-process `MemorySaver` on `conversation`, `closeout_review`, `software_dev`, `test_development` via `compileWithMemory` |
+| Checkpointer (durable) | `GSSC_CHECKPOINT_BACKEND=sqlite\|postgres` — same graphs; `reviewMemory` / `specialistNotes` survive restarts for a reused `thread_id` |
 | Auth (local) | Bypass when `GSSC_LANGGRAPH_API_KEY` is empty (or `GSSC_LANGGRAPH_AUTH_BYPASS=true`) |
 | Auth (enforced) | `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` (or `x-api-key`); see [Agent Server auth](#agent-server-auth) |
 

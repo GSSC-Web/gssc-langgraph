@@ -23,9 +23,14 @@ export {
 } from "./llm/index.js";
 export {
   memorySaver,
+  sharedCheckpointer,
+  sharedCheckpointConfig,
   threadConfig,
   compileGraph,
   compileWithMemory,
+  createCheckpointer,
+  createCheckpointerFromEnv,
+  resolveCheckpointConfig,
 } from "./checkpoint/index.js";
 export {
   createLoadGssc5ContextNode,

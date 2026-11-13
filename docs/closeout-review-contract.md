@@ -4,6 +4,49 @@ Contract for short-lived Cursor / Kaneo agents invoking assistant id `closeout_r
 
 Deterministic checks are always model-free. gssc5 context loads via the **`reviewer`** preset. Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
+## Agent Server auth
+
+When calling the Agent Server (not the local CLI), if `GSSC_LANGGRAPH_API_KEY` is set on the server, every request except `GET /ok` must include credentials:
+
+| Header | Example |
+| --- | --- |
+| `Authorization: Bearer <key>` | `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` |
+| `x-api-key: <key>` | `x-api-key: $GSSC_LANGGRAPH_API_KEY` |
+
+Local `bun run dev` with an empty key (or `GSSC_LANGGRAPH_AUTH_BYPASS=true`) does not require these headers. See README [Agent Server auth](../README.md#agent-server-auth).
+
+```bash
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "assistant_id": "closeout_review",
+    "input": {
+      "label": "pr-closeout",
+      "files": { "README.md": "# …" }
+    }
+  }'
+```
+
+```ts
+import { Client } from "@langchain/langgraph-sdk";
+
+const apiKey = process.env.GSSC_LANGGRAPH_API_KEY;
+const client = new Client({
+  apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
+  ...(apiKey
+    ? { defaultHeaders: { Authorization: `Bearer ${apiKey}` } }
+    : {}),
+});
+
+const thread = await client.threads.create();
+await client.runs.wait(thread.thread_id, "closeout_review", {
+  input: { label: "pr-closeout", files: { "README.md": "# …" } },
+});
+// Reuse thread.thread_id so reviewMemory accumulates (survives restarts when
+// GSSC_CHECKPOINT_BACKEND=sqlite|postgres).
+```
+
 ## Input
 
 Provide **at least one** scope signal. Prefer combining a change set with optional metadata.

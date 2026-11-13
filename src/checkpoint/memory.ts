@@ -1,18 +1,15 @@
 /**
- * In-process LangGraph checkpointer (MemorySaver) for thread-scoped short-term
- * memory. Suitable for local `bun run dev` / unit tests.
+ * Thread-scoped checkpointer helpers. Default saver is the process-shared
+ * instance from env (`MemorySaver` unless `GSSC_CHECKPOINT_BACKEND=sqlite|postgres`).
  *
- * Production durable stores (Postgres / SQLite savers) are a follow-up — swap
- * the saver passed to `compileWithMemory` / `compileGraph` when needed.
+ * Suitable for local `bun run dev` (memory) and production durable stores.
  */
-import {
-  MemorySaver,
-  type BaseCheckpointSaver,
-} from "@langchain/langgraph";
+import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
+import { sharedCheckpointer } from "./shared.js";
 
-/** Shared process-local checkpointer instance. */
-export const memorySaver: BaseCheckpointSaver = new MemorySaver();
+/** Alias for {@link sharedCheckpointer} (historical name used by callers/tests). */
+export const memorySaver: BaseCheckpointSaver = sharedCheckpointer;
 
 /** Build a RunnableConfig that keys checkpoints to a thread. */
 export function threadConfig(
@@ -37,7 +34,10 @@ export type CompileGraphOptions = {
    * Set false for one-shot graphs that do not need memory.
    */
   persist?: boolean;
-  /** Override the default shared MemorySaver (or pass `false` to disable). */
+  /**
+   * Override the shared checkpointer (or pass `false` to disable). Defaults to
+   * the env-selected saver (`MemorySaver` / SqliteSaver / PostgresSaver).
+   */
   checkpointer?: BaseCheckpointSaver | boolean;
   /** Optional Studio / ops display name (`compile({ name })`). */
   name?: string;
@@ -64,7 +64,7 @@ export function compileGraph<TCompiled>(
 ): TCompiled {
   const {
     persist = false,
-    checkpointer = persist ? memorySaver : undefined,
+    checkpointer = persist ? sharedCheckpointer : undefined,
     name,
     description,
   } = options;
@@ -77,7 +77,7 @@ export function compileGraph<TCompiled>(
 }
 
 /**
- * Compile with the shared MemorySaver so thread_id-based persistence works.
+ * Compile with the shared checkpointer so thread_id-based persistence works.
  * Used by `conversation` and specialist bots (`closeout_review`,
  * `software_dev`, `test_development`); prefer this for new conversational /
  * LLM graphs as well.
@@ -86,7 +86,8 @@ export function compileGraph<TCompiled>(
  * (see `threadConfig`). Agent Server / SDK runs use the thread created via
  * `POST /threads` / `client.threads.create()`. Specialists append durable
  * notes (`reviewMemory` / `specialistNotes`) in finalize when the thread is
- * reused.
+ * reused. With `GSSC_CHECKPOINT_BACKEND=sqlite|postgres`, those notes survive
+ * process restarts.
  */
 export function compileWithMemory<TCompiled>(
   builder: { compile: (options?: CompileOpts) => TCompiled },
