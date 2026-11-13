@@ -49,13 +49,15 @@ await client.runs.wait(thread.thread_id, "closeout_review", {
 
 ## Input
 
-Provide **at least one** scope signal. Prefer combining a change set with optional metadata.
+Provide **at least one** file-scoped signal. Prefer combining a change set with optional metadata.
+
+**Required for a useful first pass:** populated `files` / `changeSet.files`, **or** a real unified diff whose body contains `diff --git` headers. A prose or summary string in `diff` alone does **not** scope file checks — the graph returns a soft **warning** (not FAIL) and asks you to retry with a structured change set.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `files` | `Record<string, string>` | Path → file contents (primary change-set form) |
+| `files` | `Record<string, string>` | Path → file contents (**primary** change-set form; preferred) |
 | `fileStatuses` | `Record<string, "added"\|"modified"\|"deleted"\|"unchanged">` | Optional statuses for `files` |
-| `diff` | `string` | Optional unified diff (paths merged into the change set) |
+| `diff` | `string` | Optional **unified** diff (`diff --git a/… b/…`); paths merge into the change set. Prose/summary text is ignored for path extraction |
 | `label` | `string` | Human label for the change set (also used in the gssc5 query) |
 | `changeSet` | object | Pre-built `{ label, files[], diff? }` (skips rebuild when present) |
 | `kaneoTaskId` | `string` | Kaneo task / defect id |
@@ -132,10 +134,11 @@ CLI equivalent: `uv run closeout --workspace` or `--diff pr.patch` (collects the
 ### Agent consumption tips
 
 1. Treat `verdict` + `findings` as authoritative; ignore LLM text for PASS/FAIL.
-2. Use `gssc5ContextText` (or `gssc5Context.skills`) when drafting follow-up fixes.
-3. Surface `proposedMemoryUpdates` to a human; do not write them into gssc5 automatically.
-4. Missing gssc5 checkout → empty `gssc5Context` + `note`; graph still returns `verdict`.
-5. Missing `XAI_API_KEY` → `synthesisNote` starts with `skipped:`; graph still returns `verdict`.
+2. If scope findings mention prose/`diff --git`, retry immediately with `files` or a real patch — do not treat that warning pass as a completed closeout.
+3. Use `gssc5ContextText` (or `gssc5Context.skills`) when drafting follow-up fixes.
+4. Surface `proposedMemoryUpdates` to a human; do not write them into gssc5 automatically.
+5. Missing gssc5 checkout → empty `gssc5Context` + `note`; graph still returns `verdict`.
+6. Missing `XAI_API_KEY` → `synthesisNote` starts with `skipped:`; graph still returns `verdict`.
 
 ## Required gssc5 skills (reviewer)
 

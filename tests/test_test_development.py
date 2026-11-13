@@ -187,3 +187,47 @@ graph = builder.compile(name="Orphan Bot")
     assert any(f["check"] == "coverage_map" for f in result["findings"])
     assert verdict_from(result["findings"]) == "FAIL"
     assert any(p["action"] == "add_test" for p in result["plan"])
+
+
+def test_fe_change_set_skips_no_graphs_warning() -> None:
+    cs: ChangeSet = {
+        "label": "gssc5-54",
+        "files": [
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/modules/prompt-overlay/"
+                    "button-field/button-field.html"
+                ),
+                "status": "modified",
+                "content": '[class.border-gssc-dark-red]="invalid()"\n',
+            },
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/modules/prompt-overlay/"
+                    "button-field/button-field.test.ts"
+                ),
+                "status": "modified",
+                "content": (
+                    "expect(root.querySelector('.gssc-prompt-button-field')"
+                    "!.classList.contains('border-gssc-dark-red')).toBe(true);\n"
+                ),
+            },
+        ],
+    }
+    result = run_analysis(cs)
+    assert result["scopeGraphIds"] == []
+    assert not any(
+        f["message"] == "No graphs in scope for test development"
+        for f in result["findings"]
+    )
+    assert any(
+        f["check"] == "scope" and f["severity"] == "info" for f in result["findings"]
+    )
+    assert any("ng test" in c for c in result["commands"])
+    assert any(
+        p["action"] in ("add_test", "update_test", "run_focused") for p in result["plan"]
+    )
+    assert not any(
+        "graph.invoke" in (p.get("suggestedTest") or "") for p in result["plan"]
+    )
+    assert verdict_from(result["findings"]) == "PASS"

@@ -4,6 +4,8 @@ Contract for short-lived Cursor / Kaneo agents invoking assistant id `software_d
 
 Deterministic plan + software closeout checks are always model-free. gssc5 context loads via the **`software`** preset (`software-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
+**Work-surface specialization:** planners detect **gssc5 FE** (e.g. `gssc5-web/`, Angular/Tailwind / Prompt Overlay cues), **gssc5 BE**, vs **langgraph service** (`src/gssc_langgraph/`, graphs). FE tickets get Angular/theme-token/ng-test steps — not Python graph scaffolds.
+
 ## Input
 
 Provide a **goal** and/or a change set. Prefer combining a goal with files/diff when closing out concrete work.

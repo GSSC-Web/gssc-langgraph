@@ -26,8 +26,13 @@ from gssc_langgraph.test_dev.types import (
     TestDevCheckId,
     TestDevVerdict,
 )
+from gssc_langgraph.work_surface import detect_work_surface
 
 TEST_FILE_RE = re.compile(r"^tests/.+\.py$")
+FE_TEST_FILE_RE = re.compile(r"(?i).+\.test\.(?:ts|js)$")
+FE_SOURCE_RE = re.compile(
+    r"(?i)(gssc5-web/|prompt-overlay/|.+\.(?:component|html)\.(?:ts|js)$|.+\.html$)"
+)
 
 
 def _text_of(cs: ChangeSet, path: str) -> str:
@@ -66,11 +71,28 @@ def _primary_graph_path(graph_id: str) -> str:
     return f"src/gssc_langgraph/graphs/{graph_id}/graph.py"
 
 
+def _fe_files(cs: ChangeSet) -> list[str]:
+    return [
+        f["path"]
+        for f in cs["files"]
+        if f["status"] != "deleted" and FE_SOURCE_RE.search(f["path"])
+    ]
+
+
+def _fe_test_files(cs: ChangeSet) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for f in cs["files"]:
+        if FE_TEST_FILE_RE.search(f["path"]) and f["status"] != "deleted":
+            out.append({"path": f["path"], "body": f.get("content") or ""})
+    return out
+
+
 def resolve_scope(cs: ChangeSet) -> tuple[list[str], list[Finding]]:
     findings: list[Finding] = []
     changed = changed_graph_ids(cs)
     all_ids = graph_ids_from_change_set(cs)
     label = cs.get("label") or ""
+    surface = detect_work_surface(change_set=cs)
 
     if label == "workspace" or label.startswith("workspace"):
         graph_ids = all_ids
@@ -100,17 +122,35 @@ def resolve_scope(cs: ChangeSet) -> tuple[list[str], list[Finding]]:
                 graph_ids = all_ids
 
     if not graph_ids:
-        findings.append(
-            {
-                "check": "scope",
-                "severity": "warning",
-                "message": "No graphs in scope for test development",
-                "fix": (
-                    "Pass --workspace, a diff that touches graphs, or "
-                    "explicit paths."
-                ),
-            }
-        )
+        if surface in ("gssc5_fe", "gssc5_be") or _fe_files(cs):
+            findings.append(
+                {
+                    "check": "scope",
+                    "severity": "info",
+                    "message": (
+                        "gssc5 app change set — scoping FE/BE component tests "
+                        "(not LangGraph graphs)"
+                    ),
+                    "fix": (
+                        "Prefer companion `*.test.ts` / API tests beside the "
+                        "touched app files; graph.invoke pytest is for this "
+                        "service only."
+                    ),
+                }
+            )
+        else:
+            findings.append(
+                {
+                    "check": "scope",
+                    "severity": "warning",
+                    "message": "No graphs in scope for test development",
+                    "fix": (
+                        "Pass --workspace, a diff that touches graphs, or "
+                        "explicit paths. For gssc5 FE work, pass "
+                        "`gssc5-web/…` paths so planners skip graph scope."
+                    ),
+                }
+            )
 
     return graph_ids, findings
 
@@ -315,6 +355,31 @@ def check_timing(
     findings: list[Finding] = []
     commands: list[str] = []
     tests = _test_files(cs)
+    surface = detect_work_surface(change_set=cs)
+
+    if (surface == "gssc5_fe" or _fe_files(cs)) and not scope_graph_ids:
+        fe_tests = _fe_test_files(cs)
+        if fe_tests:
+            # Prefer a module include glob from the first test path.
+            sample = fe_tests[0]["path"]
+            if "prompt-overlay" in sample:
+                commands.append(
+                    "bunx ng test --watch=false "
+                    "--include='**/prompt-overlay/**/*.test.ts'"
+                )
+            else:
+                commands.append(
+                    f"bunx ng test --watch=false --include='**/{sample.rsplit('/', 1)[-1]}'"
+                )
+            for t in fe_tests[:3]:
+                commands.append(
+                    f"bunx ng test --watch=false --include='**/{t['path'].rsplit('/', 1)[-1]}'"
+                )
+        else:
+            commands.append(
+                "bunx ng test --watch=false --include='**/prompt-overlay/**/*.test.ts'"
+            )
+        return findings, commands
 
     focused_files: set[str] = set()
     for gid in scope_graph_ids:
@@ -357,13 +422,83 @@ def check_timing(
     return findings, commands
 
 
+def _companion_fe_test(path: str) -> str | None:
+    if FE_TEST_FILE_RE.search(path):
+        return None
+    if path.endswith(".html") or path.endswith(".ts"):
+        stem = path.rsplit(".", 1)[0]
+        if stem.endswith(".component"):
+            stem = stem[: -len(".component")]
+        dir_prefix, _, name = stem.rpartition("/")
+        return f"{dir_prefix}/{name}.test.ts" if dir_prefix else f"{name}.test.ts"
+    return None
+
+
+def _build_fe_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
+    plan: list[PlanItem] = []
+    fe_sources = _fe_files(cs)
+    fe_tests = {t["path"] for t in _fe_test_files(cs)}
+    fe_test_names = {p.rsplit("/", 1)[-1] for p in fe_tests}
+
+    for path in fe_sources:
+        companion = _companion_fe_test(path)
+        if not companion:
+            continue
+        if companion in fe_tests or companion.rsplit("/", 1)[-1] in fe_test_names:
+            continue
+        plan.append(
+            {
+                "action": "add_test",
+                "path": companion,
+                "description": (
+                    f"Ensure companion Angular test covers {path} "
+                    "(Lexical/class/theme asserts, not LangGraph graphs)"
+                ),
+                "suggestedTest": (
+                    "// Prefer existing *.test.ts patterns in this module.\n"
+                    "// Assert theme tokens / behavior — not graph.invoke.\n"
+                ),
+            }
+        )
+
+    if not plan and fe_sources:
+        plan.append(
+            {
+                "action": "update_test",
+                "description": (
+                    "Update focused FE `*.test.ts` for touched Angular/"
+                    "Tailwind files; keep theme-token asserts."
+                ),
+                "path": fe_sources[0],
+            }
+        )
+
+    for cmd in commands[:3]:
+        plan.append(
+            {
+                "action": "run_focused",
+                "description": f"Prefer focused harness: {cmd}",
+            }
+        )
+    return plan
+
+
 def build_plan(
     contracts: list[Contract],
     coverage: list[CoverageLink],
     findings: list[Finding],
     commands: list[str],
+    *,
+    change_set: ChangeSet | None = None,
 ) -> list[PlanItem]:
     plan: list[PlanItem] = []
+
+    surface = detect_work_surface(change_set=change_set) if change_set else "unknown"
+    if change_set and (
+        surface == "gssc5_fe"
+        or (surface in ("gssc5_be", "mixed", "unknown") and _fe_files(change_set))
+    ) and not any(c.get("graphId") for c in contracts):
+        return _build_fe_plan(change_set, commands)
 
     for link in coverage:
         if link["covered"]:
@@ -458,7 +593,7 @@ def run_analysis(cs: ChangeSet) -> dict[str, object]:
     checks_run.append("timing")
     findings.extend(timing_findings)
 
-    plan = build_plan(contracts, coverage, findings, commands)
+    plan = build_plan(contracts, coverage, findings, commands, change_set=cs)
 
     return {
         "scopeGraphIds": graph_ids,

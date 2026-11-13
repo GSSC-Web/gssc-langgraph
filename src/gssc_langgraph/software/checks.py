@@ -19,6 +19,7 @@ from gssc_langgraph.software.types import (
     SoftwareFinding,
     SoftwareVerdict,
 )
+from gssc_langgraph.work_surface import detect_work_surface
 
 GRAPH_FILE_RE = re.compile(
     r"^(?:src/gssc_langgraph/graphs|src/graphs)/([^/]+)/graph\.py$"
@@ -443,37 +444,47 @@ def check_third_party(cs: ChangeSet) -> list[SoftwareFinding]:
                 }
             )
     else:
-        packaging_in_scope = any(
-            f["path"]
-            in (
-                "package.json",
-                "pyproject.toml",
-                "requirements.txt",
-                "langgraph.json",
+        surface = detect_work_surface(change_set=cs)
+        if surface not in ("gssc5_fe", "gssc5_be"):
+            packaging_in_scope = any(
+                f["path"]
+                in (
+                    "package.json",
+                    "pyproject.toml",
+                    "requirements.txt",
+                    "langgraph.json",
+                )
+                or f["path"].startswith("src/gssc_langgraph/")
+                or f["path"].startswith("src/graphs/")
+                for f in cs["files"]
             )
-            or f["path"].startswith("src/")
-            for f in cs["files"]
-        )
-        if packaging_in_scope and (
-            cs.get("label") == "workspace"
-            or pkg_text
-            or any(f["path"].endswith(".py") for f in cs["files"])
-        ):
-            findings.append(
-                {
-                    "check": "third_party",
-                    "severity": "error",
-                    "path": "pyproject.toml",
-                    "message": (
-                        "Missing pyproject.toml — Python+uv is the required stack"
-                    ),
-                    "fix": (
-                        "Add pyproject.toml with a langgraph dependency; prefer uv."
-                    ),
-                }
-            )
+            if packaging_in_scope and (
+                cs.get("label") == "workspace"
+                or pkg_text
+                or any(f["path"].endswith(".py") for f in cs["files"])
+            ):
+                findings.append(
+                    {
+                        "check": "third_party",
+                        "severity": "error",
+                        "path": "pyproject.toml",
+                        "message": (
+                            "Missing pyproject.toml — Python+uv is the "
+                            "required stack"
+                        ),
+                        "fix": (
+                            "Add pyproject.toml with a langgraph dependency; "
+                            "prefer uv."
+                        ),
+                    }
+                )
 
-    if pkg_text and not pyproject_text:
+    surface = detect_work_surface(change_set=cs)
+    if (
+        pkg_text
+        and not pyproject_text
+        and surface not in ("gssc5_fe", "gssc5_be")
+    ):
         bun_only = bool(re.search(r'"packageManager"\s*:\s*"bun@', pkg_text))
         findings.append(
             {
@@ -493,7 +504,11 @@ def check_third_party(cs: ChangeSet) -> list[SoftwareFinding]:
                 ),
             }
         )
-    elif pkg_text and pyproject_text:
+    elif (
+        pkg_text
+        and pyproject_text
+        and surface not in ("gssc5_fe", "gssc5_be")
+    ):
         if re.search(r'"packageManager"\s*:\s*"bun@', pkg_text):
             findings.append(
                 {

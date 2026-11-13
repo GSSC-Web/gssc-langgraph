@@ -4,6 +4,8 @@ Contract for short-lived Cursor / Kaneo agents invoking assistant id `test_devel
 
 Deterministic contract → coverage analysis is always model-free. gssc5 context loads via the **`test`** preset (`test-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
+**Work-surface specialization:** gssc5 FE change sets (Angular `*.test.ts`, `gssc5-web/…`) scope to component tests and `bunx ng test` commands — they do **not** warn “No graphs in scope” as the primary story. LangGraph service change sets keep pytest / `graph.invoke` planning.
+
 ## Input
 
 Provide **at least one** change-set signal (files and/or diff). Workspace / git collection via the CLI is the usual path.

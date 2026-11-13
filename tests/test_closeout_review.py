@@ -358,3 +358,45 @@ def test_fails_on_committed_secret_looking_keys() -> None:
 def test_scope_errors_when_empty() -> None:
     findings = check_scope(None)
     assert verdict_from(findings) == "FAIL"
+
+
+def test_scope_soft_warns_on_prose_diff_without_files() -> None:
+    findings = check_scope(
+        {
+            "label": "prose",
+            "files": [],
+            "diff": (
+                "Summary: swapped Prompt Overlay invalid chrome to gssc "
+                "failure tokens across six fields."
+            ),
+        }
+    )
+    assert verdict_from(findings) == "PASS"
+    assert any(
+        f["check"] == "scope"
+        and f["severity"] == "warning"
+        and "Prose/summary" in f["message"]
+        for f in findings
+    )
+    assert any(f.get("fix") and "diff --git" in f["fix"] for f in findings)
+
+
+@pytest.mark.asyncio
+async def test_graph_soft_pass_on_prose_diff() -> None:
+    result = await closeout_graph.ainvoke(
+        {
+            "label": "gssc5-54-prose",
+            "diff": "Changed text-field invalid classes to border-gssc-dark-red.",
+        },
+        {
+            "configurable": {
+                "thread_id": f"closeout-prose-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["verdict"] == "PASS"
+    assert any(
+        f["check"] == "scope" and f["severity"] == "warning" for f in result["findings"]
+    )
