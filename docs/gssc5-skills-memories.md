@@ -57,15 +57,27 @@ import {
 - `ensureGssc5Checkout` — local path first, else clone/fetch into cache
 - `listSkills` / `listMemories` — catalog from `.agents/`
 - `selectAndLoad` — keyword + preference scoring, then read file bodies
-- `loadGssc5ContextForRole("software" | "test" | "general")` — role presets
+- `loadGssc5ContextForRole("software" | "test" | "general" | "reviewer")` — role presets
 - `createLoadGssc5ContextNode({ role, queryField })` — reusable LangGraph node
+
+### Role presets
+
+| Role | Prefer skills | Prefer memories |
+| --- | --- | --- |
+| `software` | software + requirements closeout | `backend-arch`, `public-arch`, `members-arch` |
+| `test` | test + requirements closeout | same arch trio |
+| `general` | (none) | same arch trio |
+| `reviewer` | all three peer closeout skills | same arch trio |
+
+`CLOSEOUT_PEER_SKILL_IDS` = `requirements-closeout-review`, `software-closeout-review`, `test-closeout-review`.  
+`ARCH_MEMORY_IDS` = `backend-arch`, `public-arch`, `members-arch`.
 
 ### Relevance (practical, Bun/TS)
 
 1. Tokenize the query (goal / requirements / paths).
 2. Score each skill/memory: id/name/description/tag overlap, `importance: high`, role `prefer*`, domain heuristics (`closeout`, `backend`, `kaneo`, …).
 3. Always include `requireSkills` / `requireMemories` when present in the catalog.
-4. Cap defaults: 3 skills, 2 memories.
+4. Cap defaults: 3 skills, 2 memories (closeout_review uses 3 / 3 with hard-requires).
 
 ### State fields written
 
@@ -82,10 +94,11 @@ import {
 | --- | --- | --- |
 | `software_dev` | `software` | After `parse_input`; requires `software-closeout-review` when available |
 | `test_development` | `test` | After `parse_changeset`; requires `test-closeout-review`; query from label + paths |
+| `closeout_review` | `reviewer` | After `parse_changeset`; `requireSkills` = all three peer closeout skills; `requireMemories` = arch trio every run |
 
-Not wired: `health` (and other one-shot smoke / model-free checkers that do not need Dot Agents text).
+Not wired: `health` / `conversation` (smoke assistants that do not need Dot Agents text).
 
 ## Tests
 
 Fixture checkout: `tests/fixtures/gssc5/.agents/…`  
-Suite: `tests/gssc5_context.test.ts` (`bun test`) — auto-checkout covered with a mock `git` runner (no network).
+Suite: `tests/gssc5_context.test.ts` (`bun test`) — auto-checkout covered with a mock `git` runner (no network). Closeout graph wiring also covered in `tests/closeout_review.test.ts`.

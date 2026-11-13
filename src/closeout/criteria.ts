@@ -94,11 +94,14 @@ export const CRITERIA: Criterion[] = [
  */
 export const BASELINE_ASSISTANT_IDS = ["health"] as const;
 
-/** Smoke / tooling assistants that must remain model-free when present. */
+/**
+ * Smoke / tooling assistants that must remain model-free when present.
+ * `closeout_review` is excluded: deterministic checks stay model-free, but an
+ * optional `synthesize` node may call `createChatModel` when a key is set.
+ */
 export const MODEL_FREE_ASSISTANT_IDS = [
   "health",
   "conversation",
-  "closeout_review",
   "software_dev",
   "test_development",
 ] as const;

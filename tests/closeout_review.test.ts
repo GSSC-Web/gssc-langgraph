@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { graph as closeoutGraph } from "../src/graphs/closeout_review/graph.js";
 import {
   checkContracts,
@@ -10,8 +11,29 @@ import {
   verdictFrom,
 } from "../src/closeout/checks.js";
 import { BASELINE_ASSISTANT_IDS } from "../src/closeout/criteria.js";
+import {
+  ARCH_MEMORY_IDS,
+  CLOSEOUT_PEER_SKILL_IDS,
+} from "../src/gssc5/index.js";
 import { collectWorkspace } from "../src/review/collect.js";
 import type { ChangeSet } from "../src/closeout/types.js";
+
+const FIXTURE_ROOT = join(import.meta.dir, "fixtures", "gssc5");
+
+const MINIMAL_FILES = {
+  "langgraph.json": JSON.stringify({
+    graphs: { health: "./src/graphs/health/graph.ts:graph" },
+  }),
+  "src/graphs/health/graph.ts": `
+import { Annotation, StateGraph } from "@langchain/langgraph";
+const S = Annotation.Root({ status: Annotation<string>() });
+export const graph = new StateGraph(S)
+  .addNode("n", async () => ({ status: "ok" }))
+  .addEdge("__start__", "n")
+  .compile();
+graph.name = "GSSC Health";
+`,
+};
 
 describe("closeout_review graph", () => {
   test("is compiled", () => {
@@ -22,6 +44,69 @@ describe("closeout_review graph", () => {
   test("baseline contract is health only (not sample_agent)", () => {
     expect([...BASELINE_ASSISTANT_IDS]).toEqual(["health"]);
     expect(BASELINE_ASSISTANT_IDS).not.toContain("sample_agent");
+  });
+
+  test("loads gssc5 reviewer context from fixture and returns a verdict", async () => {
+    const result = await closeoutGraph.invoke(
+      {
+        label: "minimal-closeout",
+        kaneoTaskId: "KANEO-1",
+        prScope: "origin/master...HEAD",
+        uids: ["health"],
+        files: MINIMAL_FILES,
+      },
+      { configurable: { gssc5Root: FIXTURE_ROOT } },
+    );
+
+    expect(result.steps).toContain("load_gssc5_context");
+    expect(result.steps).toContain("verdict");
+    expect(result.steps).toContain("synthesize");
+    expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);
+    expect(result.gssc5Root).toBe(FIXTURE_ROOT);
+    expect(result.gssc5Context).toBeTruthy();
+    for (const id of CLOSEOUT_PEER_SKILL_IDS) {
+      expect(result.gssc5Context?.skills.some((s) => s.id === id)).toBe(true);
+    }
+    for (const id of ARCH_MEMORY_IDS) {
+      expect(result.gssc5Context?.memories.some((m) => m.id === id)).toBe(true);
+    }
+    expect(result.gssc5ContextText).toContain("## Skill: software-closeout-review");
+    expect(result.synthesisNote).toMatch(/^(ok|skipped:|error:)/);
+    expect(typeof result.narrativeSummary).toBe("string");
+  });
+
+  test("missing gssc5 checkout still returns a verdict", async () => {
+    const result = await closeoutGraph.invoke(
+      {
+        label: "missing-gssc5",
+        files: MINIMAL_FILES,
+      },
+      {
+        configurable: {
+          gssc5Root: "/tmp/missing-gssc5-closeout-xyz",
+          gssc5Enabled: true,
+        },
+      },
+    );
+
+    // ensureGssc5Checkout may still find a sibling/cache; force empty via disable:
+    expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);
+    expect(result.steps).toContain("load_gssc5_context");
+  });
+
+  test("gssc5Enabled false yields empty context and still verdicts", async () => {
+    const result = await closeoutGraph.invoke(
+      {
+        label: "disabled-gssc5",
+        files: MINIMAL_FILES,
+      },
+      { configurable: { gssc5Enabled: false } },
+    );
+
+    expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);
+    expect(result.gssc5Context?.note).toBe("disabled");
+    expect(result.gssc5Context?.skills ?? []).toEqual([]);
+    expect(result.synthesisNote).toMatch(/skipped:|ok|error:/);
   });
 
   test("PASSes current workspace closeout", async () => {
@@ -50,6 +135,8 @@ describe("closeout_review graph", () => {
     expect(result.checksRun).toContain("contracts");
     expect(result.checksRun).toContain("secrets");
     expect(result.steps).toContain("verdict");
+    expect(result.steps).toContain("load_gssc5_context");
+    expect(result.steps).toContain("synthesize");
   });
 
   test("FAILs when new graph is unregistered", () => {

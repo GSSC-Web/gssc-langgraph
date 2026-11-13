@@ -15,9 +15,10 @@ export type CreateChatModelOptions = Omit<ChatXAIInput, "model"> & {
  * Model id defaults to `grok-4.7`, overridable via `GSSC_XAI_MODEL` / `XAI_MODEL`
  * or the `model` option.
  *
- * Smoke/tooling assistants (`health`, `conversation`, `closeout_review`,
- * `software_dev`, `test_development`) stay model-free and should not call
- * this helper.
+ * Deterministic smoke/tooling paths (`health`, `conversation`,
+ * `software_dev`, `test_development`, and closeout checks) stay model-free.
+ * `closeout_review` may call this only from its optional synthesis node when
+ * `XAI_API_KEY` is present; the graph must still complete without a key.
  */
 export function createChatModel(options: CreateChatModelOptions = {}): ChatXAI {
   const { model: modelOverride, apiKey, ...rest } = options;

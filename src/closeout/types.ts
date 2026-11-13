@@ -48,3 +48,40 @@ export type CloseoutReport = {
   findings: CloseoutFinding[];
   checksRun: CloseoutCheckId[];
 };
+
+/**
+ * How the caller scoped this closeout turn (for short-lived Cursor agents).
+ * Provide at least one of: Kaneo task id, PR scope, UID list, or files/diff.
+ */
+export type CloseoutInputScope = {
+  /** Kaneo task id when reviewing a tracked defect/task. */
+  kaneoTaskId?: string;
+  /**
+   * PR / git scope hint (e.g. `origin/master...HEAD`, PR URL, or branch name).
+   * Informational for synthesis; CLI still collects the change set separately.
+   */
+  prScope?: string;
+  /** Explicit requirement / assistant / contract UIDs in scope. */
+  uids?: string[];
+};
+
+/** Proposed gssc5 memory update from optional LLM synthesis (advisory only). */
+export type ProposedMemoryUpdate = {
+  /** Target memory id (e.g. `backend-arch`) or `new:<slug>`. */
+  memoryId: string;
+  /** Short proposed text / bullet to add or revise. */
+  summary: string;
+  rationale?: string;
+};
+
+export type CloseoutSynthesis = {
+  /** Short natural-language summary for humans / Cursor agents. */
+  narrativeSummary: string;
+  /** Suggested memory edits — never applied automatically. */
+  proposedMemoryUpdates: ProposedMemoryUpdate[];
+  /**
+   * Why synthesis ran or was skipped
+   * (`ok`, `skipped: no XAI_API_KEY`, `skipped: disabled`, `error: …`).
+   */
+  note: string;
+};

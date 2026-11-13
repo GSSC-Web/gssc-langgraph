@@ -3,6 +3,9 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ARCH_MEMORY_IDS,
+  CLOSEOUT_PEER_SKILL_IDS,
+  ROLE_PRESETS,
   createLoadGssc5ContextNode,
   checkoutGssc5ToCache,
   ensureGssc5Checkout,
@@ -19,6 +22,7 @@ import {
   tokenize,
   type GitRunner,
 } from "../src/gssc5/index.js";
+import { graph as closeoutGraph } from "../src/graphs/closeout_review/graph.js";
 import { graph as softwareGraph } from "../src/graphs/software_dev/graph.js";
 import { graph as testDevGraph } from "../src/graphs/test_development/graph.js";
 
@@ -152,9 +156,18 @@ enabled: true
     const memories = listMemories(FIXTURE_ROOT);
     expect(skills.map((s) => s.id)).toContain("software-closeout-review");
     expect(skills.map((s) => s.id)).toContain("test-closeout-review");
+    expect(skills.map((s) => s.id)).toContain("requirements-closeout-review");
     expect(skills.map((s) => s.id)).toContain("kaneo-create-task");
     expect(memories.map((m) => m.id)).toContain("backend-arch");
     expect(memories.map((m) => m.id)).toContain("public-arch");
+    expect(memories.map((m) => m.id)).toContain("members-arch");
+  });
+
+  test("reviewer preset prefers three closeout skills + arch memories", () => {
+    expect(ROLE_PRESETS.reviewer.preferSkills).toEqual([
+      ...CLOSEOUT_PEER_SKILL_IDS,
+    ]);
+    expect(ROLE_PRESETS.reviewer.preferMemories).toEqual([...ARCH_MEMORY_IDS]);
   });
 });
 
@@ -288,5 +301,36 @@ describe("health graph", () => {
     expect(
       result.gssc5Context?.skills.some((s) => s.id === "test-closeout-review"),
     ).toBe(true);
+  });
+
+  test("closeout_review includes load_gssc5_context with reviewer requires", async () => {
+    const result = await closeoutGraph.invoke(
+      {
+        label: "closeout gssc5",
+        files: {
+          "langgraph.json": JSON.stringify({
+            graphs: { health: "./src/graphs/health/graph.ts:graph" },
+          }),
+          "src/graphs/health/graph.ts": `
+import { Annotation, StateGraph } from "@langchain/langgraph";
+const S = Annotation.Root({ status: Annotation<string>() });
+export const graph = new StateGraph(S)
+  .addNode("n", async () => ({ status: "ok" }))
+  .addEdge("__start__", "n")
+  .compile();
+graph.name = "GSSC Health";
+`,
+        },
+      },
+      { configurable: { gssc5Root: FIXTURE_ROOT } },
+    );
+    expect(result.steps).toContain("load_gssc5_context");
+    expect(result.verdict === "PASS" || result.verdict === "FAIL").toBe(true);
+    for (const id of CLOSEOUT_PEER_SKILL_IDS) {
+      expect(result.gssc5Context?.skills.some((s) => s.id === id)).toBe(true);
+    }
+    for (const id of ARCH_MEMORY_IDS) {
+      expect(result.gssc5Context?.memories.some((m) => m.id === id)).toBe(true);
+    }
   });
 });

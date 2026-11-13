@@ -45,7 +45,11 @@ export type {
   SelectGssc5Options,
   LoadGssc5ContextOptions,
 } from "./types.js";
-export { ROLE_PRESETS } from "./types.js";
+export {
+  ROLE_PRESETS,
+  ARCH_MEMORY_IDS,
+  CLOSEOUT_PEER_SKILL_IDS,
+} from "./types.js";
 export type {
   Gssc5ContextNodeConfig,
   Gssc5ContextNodeState,

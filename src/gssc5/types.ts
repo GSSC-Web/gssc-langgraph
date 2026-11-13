@@ -87,7 +87,21 @@ export interface LoadGssc5ContextOptions extends SelectGssc5Options {
 }
 
 /** Role presets used by domain graphs. */
-export type Gssc5RoleHint = "software" | "test" | "general";
+export type Gssc5RoleHint = "software" | "test" | "general" | "reviewer";
+
+/** Architecture memories preferred (and often required) by domain graphs. */
+export const ARCH_MEMORY_IDS = [
+  "backend-arch",
+  "public-arch",
+  "members-arch",
+] as const;
+
+/** Peer closeout-review skills consumed by the closeout_review graph. */
+export const CLOSEOUT_PEER_SKILL_IDS = [
+  "requirements-closeout-review",
+  "software-closeout-review",
+  "test-closeout-review",
+] as const;
 
 export const ROLE_PRESETS: Record<
   Gssc5RoleHint,
@@ -95,14 +109,19 @@ export const ROLE_PRESETS: Record<
 > = {
   software: {
     preferSkills: ["software-closeout-review", "requirements-closeout-review"],
-    preferMemories: ["backend-arch", "public-arch", "members-arch"],
+    preferMemories: [...ARCH_MEMORY_IDS],
   },
   test: {
     preferSkills: ["test-closeout-review", "requirements-closeout-review"],
-    preferMemories: ["backend-arch", "public-arch", "members-arch"],
+    preferMemories: [...ARCH_MEMORY_IDS],
   },
   general: {
     preferSkills: [],
-    preferMemories: ["backend-arch", "public-arch", "members-arch"],
+    preferMemories: [...ARCH_MEMORY_IDS],
+  },
+  /** Peer closeout reviewer — all three closeout skills + arch memories. */
+  reviewer: {
+    preferSkills: [...CLOSEOUT_PEER_SKILL_IDS],
+    preferMemories: [...ARCH_MEMORY_IDS],
   },
 };
