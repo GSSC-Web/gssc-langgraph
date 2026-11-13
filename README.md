@@ -18,6 +18,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ```text
 .
 ├── langgraph.json              # Agent Server config (graphs + env)
+├── mise.toml                   # mise-en-place: Bun pin + task aliases
 ├── package.json                # Bun package manager
 ├── tsconfig.json
 ├── .env.example
@@ -94,14 +95,14 @@ The Agent Server also exposes HTTP `GET /ok` for process health.
 
 ## Run locally (Bun)
 
-Requires [Bun](https://bun.sh) (≥ 1.1 recommended).
+Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|review` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
 
 ```bash
-bun install
+bun install          # or: mise run install
 cp .env.example .env
 # optional: set LANGSMITH_API_KEY for tracing / Studio
 
-bun run dev
+bun run dev          # or: mise run dev
 ```
 
 This starts `@langchain/langgraph-cli` in in-memory / local mode.
@@ -115,13 +116,13 @@ Expected endpoints:
 Unit tests (no server required):
 
 ```bash
-bun test
+bun test             # or: mise run test
 ```
 
 Typecheck:
 
 ```bash
-bun run typecheck
+bun run typecheck    # or: mise run typecheck
 ```
 
 ### Docker / platform image
