@@ -1,6 +1,6 @@
 {
   "name": "gssc-langgraph",
-  "version": "0.1.0",
+  "version": "26.11.0",
   "description": "Standalone LangGraph.js service for GSSC-Web (consumed by gssc5).",
   "private": true,
   "type": "module",
