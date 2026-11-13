@@ -1,6 +1,6 @@
 # test_development I/O contract
 
-Contract for short-lived Cursor / Kaneo agents invoking assistant id `test_development` (or `bun run test-dev --json`).
+Contract for short-lived Cursor / Kaneo agents invoking assistant id `test_development` (or `uv run test-dev --json`).
 
 Deterministic contract → coverage analysis is always model-free. gssc5 context loads via the **`test`** preset (`test-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
@@ -32,15 +32,15 @@ Provide **at least one** change-set signal (files and/or diff). Workspace / git 
 {
   "label": "pr-test-dev",
   "files": {
-    "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
-    "src/graphs/health/graph.ts": "export const graph = {}",
-    "tests/graphs.test.ts": "import { describe, test } from \"bun:test\";"
+    "langgraph.json": "{\"graphs\":{\"health\":\"./src/gssc_langgraph/graphs/health/graph.py:graph\"}}",
+    "src/gssc_langgraph/graphs/health/graph.py": "from langgraph.graph import StateGraph\ngraph = StateGraph(...).compile()",
+    "tests/test_graphs.py": "import pytest\n\ndef test_health():\n    assert True"
   },
   "diff": ""
 }
 ```
 
-CLI equivalent: `bun run test-dev --workspace` or `--diff pr.patch` (collects the file map for you). Pass `--run` to execute suggested focused `bun test` commands after analysis.
+CLI equivalent: `uv run test-dev --workspace` or `--diff pr.patch` (collects the file map for you). Pass `--run` to execute suggested focused `pytest` commands after analysis.
 
 ## Output
 
@@ -52,7 +52,7 @@ CLI equivalent: `bun run test-dev --workspace` or `--diff pr.patch` (collects th
 | `contracts` | `Contract[]` | Behaviors permanent tests should lock |
 | `coverage` | `CoverageLink[]` | Contract → test path / covered flag |
 | `plan` | `PlanItem[]` | Test plan (`add_test`, `update_test`, `add_assert`, …) |
-| `commands` | `string[]` | Suggested focused `bun test …` commands |
+| `commands` | `string[]` | Suggested focused `pytest …` commands |
 | `findings` | `Finding[]` | Per-check issues with optional `contractId` / `fix` |
 | `checksRun` | `string[]` | Checks that executed (`scope`, `coverage_map`, …) |
 | `steps` | `string[]` | Graph step names (`parse_changeset`, `load_gssc5_context`, `analyze`, `verdict`, `synthesize`, …) |
@@ -82,7 +82,7 @@ CLI equivalent: `bun run test-dev --workspace` or `--diff pr.patch` (collects th
 ### Agent consumption tips
 
 1. Treat `verdict` + `findings` as authoritative; ignore LLM text for PASS/FAIL.
-2. Use `plan` + `commands` to add/update permanent bun:test coverage; assert contracts, not incidental SW.
+2. Use `plan` + `commands` to add/update permanent pytest coverage; assert contracts, not incidental SW.
 3. Use `gssc5ContextText` when drafting follow-up test stubs.
 4. Surface `proposedMemoryUpdates` to a human; do not write them into gssc5 automatically.
 5. Missing `XAI_API_KEY` → `synthesisNote` starts with `skipped:`; graph still returns `verdict` + `plan`.

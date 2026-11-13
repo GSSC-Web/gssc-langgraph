@@ -1,6 +1,6 @@
 # closeout_review I/O contract
 
-Contract for short-lived Cursor / Kaneo agents invoking assistant id `closeout_review` (or `bun run closeout --json`).
+Contract for short-lived Cursor / Kaneo agents invoking assistant id `closeout_review` (or `uv run closeout --json`).
 
 Deterministic checks are always model-free. gssc5 context loads via the **`reviewer`** preset. Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
@@ -13,7 +13,7 @@ When calling the Agent Server (not the local CLI), if `GSSC_LANGGRAPH_API_KEY` i
 | `Authorization: Bearer <key>` | `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` |
 | `x-api-key: <key>` | `x-api-key: $GSSC_LANGGRAPH_API_KEY` |
 
-Local `bun run dev` with an empty key (or `GSSC_LANGGRAPH_AUTH_BYPASS=true`) does not require these headers. See README [Agent Server auth](../README.md#agent-server-auth).
+Local `uv run langgraph dev` with an empty key (or `GSSC_LANGGRAPH_AUTH_BYPASS=true`) does not require these headers. See README [Agent Server auth](../README.md#agent-server-auth).
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
@@ -78,8 +78,8 @@ Provide **at least one** scope signal. Prefer combining a change set with option
 {
   "label": "pr-closeout",
   "files": {
-    "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
-    "src/graphs/health/graph.ts": "export const graph = {}"
+    "langgraph.json": "{\"graphs\":{\"health\":\"./src/gssc_langgraph/graphs/health/graph.py:graph\"}}",
+    "src/gssc_langgraph/graphs/health/graph.py": "from langgraph.graph import StateGraph\ngraph = StateGraph(...).compile()"
   },
   "diff": ""
 }
@@ -97,7 +97,7 @@ Provide **at least one** scope signal. Prefer combining a change set with option
 }
 ```
 
-CLI equivalent: `bun run closeout --workspace` or `--diff pr.patch` (collects the file map for you).
+CLI equivalent: `uv run closeout --workspace` or `--diff pr.patch` (collects the file map for you).
 
 ## Output
 
