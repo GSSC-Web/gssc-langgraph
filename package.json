@@ -12,6 +12,7 @@
     "typecheck": "bunx tsc -p tsconfig.json --noEmit",
     "lint": "bunx tsc -p tsconfig.json --noEmit",
     "review": "bun run src/review/cli.ts",
+    "test-dev": "bun run src/test_dev/cli.ts",
     "software": "bun run src/software/cli.ts"
   },
   "dependencies": {
