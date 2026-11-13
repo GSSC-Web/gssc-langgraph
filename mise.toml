@@ -8,6 +8,7 @@
 #   mise run test
 #   mise run typecheck
 #   mise run review
+#   mise run software
 
 min_version = "2025.10.0"
 
@@ -37,6 +38,11 @@ run = "bun run typecheck"
 [tasks.review]
 description = "Run the service review workflow (PASS/FAIL)"
 run = "bun run review"
+
+[tasks.software]
+description = "Run the software development bot (plan + closeout PASS/FAIL)"
+alias = ["sw", "software-dev"]
+run = "bun run software"
 
 [tasks.build]
 description = "Compile TypeScript with tsc"

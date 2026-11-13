@@ -26,12 +26,70 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── src/graphs/
 │   ├── health/graph.ts         # assistant id: health
 │   ├── sample_agent/graph.ts   # assistant id: sample_agent
-│   └── service_review/graph.ts # assistant id: service_review
-├── src/review/                 # review criteria, collectors, CLI
+│   ├── service_review/graph.ts # assistant id: service_review
+│   └── software_dev/graph.ts   # assistant id: software_dev
+├── src/review/                 # service review criteria, collectors, CLI
+├── src/software/               # software_dev plan + closeout criteria, CLI
 └── tests/
 ```
 
 Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`.
+
+## Software development bot
+
+Runnable agentic software workflow (LangGraph graph + CLI). Behavioral reference: [gssc5 software agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/software/agent.md) and [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md) (scope → implement → third-party-first → PASS/FAIL, no silent contract rewrites) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
+
+The sibling **test** development bot is a separate assistant (`test_dev`); this bot owns `software_dev` / `src/software/` only.
+
+### What it does
+
+1. Emits a deterministic **implementation plan** from `--goal` (and optional change set).
+2. Runs software closeout checks:
+
+| Check | Focus |
+| --- | --- |
+| `scope` | Goal and/or reviewable change set present |
+| `trace` | New assistants registered in `langgraph.json` + README mention |
+| `match` | Real StateGraph + `export const graph` (not a hollow stub) |
+| `quality` | Fail-fast, size, `graph.name`, model-free smoke assistants |
+| `third_party` | LangGraph.js / Bun / langgraph-cli over reinvented HTTP or Python |
+| `discipline` | No silent baseline/contract drops; no deleting covering tests to “fix” SW |
+
+**Output:** `verdict: PASS|FAIL`, `summary`, `plan[]`, and `findings[]`.
+
+### Trigger locally
+
+```bash
+bun run software --goal "Add foo assistant that …"
+bun run software --goal "…" --workspace
+bun run software --workspace          # closeout scan of the tree
+bun run software --diff pr.patch
+bun run software --plan-only --goal "Fix health checkedAt skew"
+bun run software --json
+# or: mise run software -- --goal "…"
+```
+
+Default git base is `origin/master`. Exit `0` on PASS, `1` on FAIL.
+
+### Trigger via Agent Server
+
+With `bun run dev`, call assistant `software_dev`:
+
+```bash
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "assistant_id": "software_dev",
+    "input": {
+      "goal": "Add a domain graph for membership lookups",
+      "label": "api",
+      "files": {
+        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\",\"sample_agent\":\"./src/graphs/sample_agent/graph.ts:graph\"}}",
+        "src/graphs/membership/graph.ts": "export const graph = {}"
+      }
+    }
+  }'
+```
 
 ## Service review workflow
 
@@ -90,12 +148,13 @@ Prefer `bun run review` for git-aware PR/diff collection; the assistant accepts 
 | `health` | Smoke / liveness payload via the same runs API |
 | `sample_agent` | Model-free echo workflow for gssc5 integration tests |
 | `service_review` | Model-free review workflow (registry, stack, gssc5 contract, …) |
+| `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) |
 
 The Agent Server also exposes HTTP `GET /ok` for process health.
 
 ## Run locally (Bun)
 
-Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|review` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
+Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|review|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
 
 ```bash
 bun install          # or: mise run install
