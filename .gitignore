@@ -1,0 +1,26 @@
+# Dependencies / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Bun (commit bun.lock; ignore binary lock legacy)
+bun.lockb
+
+# Environments
+.env
+.env.local
+
+# Logs / caches
+*.log
+.turbo/
+.eslintcache
+.ipynb_checkpoints/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# LangGraph local server / CLI
+.langgraph_api/
