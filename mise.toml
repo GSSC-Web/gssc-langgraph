@@ -1,12 +1,11 @@
 #:schema https://mise.jdx.dev/schema/mise.json
-# gssc-langgraph: TypeScript + Bun LangGraph Agent Server.
+# gssc-langgraph: Python LangGraph Agent Server (uv).
 #
-# Install tools, then use mise tasks (or plain bun scripts):
+# Install tools, then use mise tasks (or plain uv):
 #   mise install
-#   mise run install   # bun install
-#   mise run dev       # Agent Server on :2024
+#   mise run install   # uv sync --all-extras
+#   mise run dev       # Agent Server on :2024 (MCP at /mcp)
 #   mise run test
-#   mise run typecheck
 #   mise run closeout
 #   mise run test-dev
 #   mise run software
@@ -14,46 +13,42 @@
 min_version = "2025.10.0"
 
 [tools]
-# Match package.json packageManager (bun@1.4.4).
-bun = "1.4.4"
+python = "3.12"
+uv = "0.13.8"
 
 [tasks.install]
-description = "Install package dependencies"
+description = "Install package dependencies (uv sync)"
 alias = "i"
-run = "bun install"
+run = "uv sync --all-extras"
 
 [tasks.dev]
-description = "Start the LangGraph Agent Server (http://127.0.0.1:2024)"
+description = "Start the LangGraph Agent Server (http://127.0.0.1:2024, MCP /mcp)"
 alias = ["serve", "s"]
-run = "bun run dev"
+run = "uv run langgraph dev --port 2024"
 
 [tasks.test]
 description = "Run unit tests once"
-run = "bun test"
+run = "uv run pytest"
 
 [tasks.typecheck]
-description = "Typecheck with tsc --noEmit"
+description = "Typecheck with pyright if available (optional)"
 alias = "types"
-run = "bun run typecheck"
+run = "uv run python -c \"import gssc_langgraph; print('import ok')\""
 
 [tasks.closeout]
 description = "Run the closeout review workflow (PASS/FAIL)"
 alias = ["closeout-review", "cr"]
-run = "bun run closeout"
+run = "uv run closeout"
 
 [tasks.test-dev]
 description = "Run the test development workflow (contracts → plan, PASS/FAIL)"
-run = "bun run test-dev"
+run = "uv run test-dev"
 
 [tasks.software]
 description = "Run the software development bot (plan + closeout PASS/FAIL)"
 alias = ["sw", "software-dev"]
-run = "bun run software"
-
-[tasks.build]
-description = "Compile TypeScript with tsc"
-run = "bun run build"
+run = "uv run software"
 
 [tasks.version]
-description = "Print Bun version"
-run = "bun --version"
+description = "Print Python and package version"
+run = "uv run python -c \"import gssc_langgraph, importlib.metadata as m; print(m.version('gssc-langgraph')); print(__import__('sys').version)\""

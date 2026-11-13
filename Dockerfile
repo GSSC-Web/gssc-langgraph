@@ -1,19 +1,20 @@
-# Minimal image packaging graph code with Bun.
-# Prefer `bunx @langchain/langgraph-cli build` for a full Agent Server image
-# driven by langgraph.json.
+# Minimal image packaging graph code with Python / uv.
+# Prefer `uv run langgraph build` / langgraph-cli for a full Agent Server image
+# driven by langgraph.json (includes MCP at /mcp).
 #
 # Day-to-day local work:
-#   bun install
-#   bun run dev
+#   uv sync --all-extras
+#   uv run langgraph dev
 
-FROM oven/bun:1.4-alpine
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
 
-COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile || bun install
-
-COPY tsconfig.json langgraph.json ./
+COPY pyproject.toml uv.lock* README.md ./
 COPY src ./src
+COPY langgraph.json ./
 
-CMD ["bun", "run", "src/index.ts"]
+RUN uv sync --frozen --no-dev || uv sync --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024"]

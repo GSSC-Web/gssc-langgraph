@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 # Path → job mapping (also encoded in `changes` filters below):
-# - unit    ← src/, tests/, package/lock, tsconfig, langgraph.json, mise, Dockerfile, scripts, this workflow
-# - sqlite  ← checkpoint sources, verify-sqlite script, lock/package (native deps), this workflow
+# - unit    ← src/, tests/, pyproject/uv.lock, langgraph.json, mise, Dockerfile, scripts, this workflow
+# - sqlite  ← checkpoint sources, verify_sqlite script, pyproject/uv.lock, this workflow
 # Docs / README / .env.example-only PRs skip unit + sqlite; the `CI` gate still reports success
 # so it can be a required status check that blocks merge on failure.
 
@@ -38,9 +38,8 @@ jobs:
             unit:
               - 'src/**'
               - 'tests/**'
-              - 'package.json'
-              - 'bun.lock'
-              - 'tsconfig.json'
+              - 'pyproject.toml'
+              - 'uv.lock'
               - 'langgraph.json'
               - 'mise.toml'
               - 'Dockerfile'
@@ -48,10 +47,10 @@ jobs:
               - 'scripts/**'
               - '.github/workflows/test.yml'
             sqlite:
-              - 'src/checkpoint/**'
-              - 'scripts/verify-sqlite-checkpoint.mjs'
-              - 'package.json'
-              - 'bun.lock'
+              - 'src/gssc_langgraph/checkpoint/**'
+              - 'scripts/verify_sqlite_checkpoint.py'
+              - 'pyproject.toml'
+              - 'uv.lock'
               - '.github/workflows/test.yml'
 
   unit:
@@ -66,21 +65,21 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v7
 
-      - name: Install Bun
+      - name: Install Python and uv
         uses: jdx/mise-action@v5
         with:
           working_directory: ${{ github.workspace }}
           experimental: true
-          install_args: bun
+          install_args: python uv
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: uv sync --all-extras --frozen
 
-      - name: Typecheck
-        run: bun run typecheck
+      - name: Import smoke
+        run: uv run python -c "import gssc_langgraph; print('import ok')"
 
       - name: Unit tests
-        run: bun test
+        run: uv run pytest
 
   sqlite:
     name: sqlite
@@ -94,19 +93,18 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v7
 
-      - name: Install Bun and Node
+      - name: Install Python and uv
         uses: jdx/mise-action@v5
         with:
           working_directory: ${{ github.workspace }}
           experimental: true
-          # better-sqlite3 is Node-only; Bun installs deps, Node runs the smoke.
-          install_args: bun node
+          install_args: python uv
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: uv sync --all-extras --frozen
 
       - name: SQLite checkpointer smoke
-        run: bun run test:sqlite
+        run: uv run python scripts/verify_sqlite_checkpoint.py
 
   ci:
     name: CI

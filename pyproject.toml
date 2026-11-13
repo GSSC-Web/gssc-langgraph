@@ -1,0 +1,44 @@
+[project]
+name = "gssc-langgraph"
+version = "26.11.3"
+description = "Standalone LangGraph (Python) Agent Server for GSSC-Web — MCP endpoint at /mcp."
+readme = "README.md"
+authors = [
+    { name = "GSSC-Web" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.3",
+    "langgraph-sdk>=0.1.61",
+    "langgraph-checkpoint>=2",
+    "langgraph-checkpoint-sqlite>=2",
+    "langgraph-checkpoint-postgres>=2",
+    "langchain-xai>=0.2",
+    "langchain-core>=0.3",
+    "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "langgraph-cli[inmem]>=0.2",
+]
+
+[project.scripts]
+closeout = "gssc_langgraph.closeout.cli:main"
+software = "gssc_langgraph.software.cli:main"
+test-dev = "gssc_langgraph.test_dev.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.uv]
+package = true

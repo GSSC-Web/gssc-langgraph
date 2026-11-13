@@ -1,17 +1,32 @@
 {
   "$schema": "https://langgra.ph/schema.json",
-  "node_version": "20",
+  "python_version": "3.12",
   "dependencies": ["."],
   "graphs": {
-    "health": "./src/graphs/health/graph.ts:graph",
-    "conversation": "./src/graphs/conversation/graph.ts:graph",
-    "closeout_review": "./src/graphs/closeout_review/graph.ts:graph",
-    "test_development": "./src/graphs/test_development/graph.ts:graph",
-    "software_dev": "./src/graphs/software_dev/graph.ts:graph"
+    "health": {
+      "path": "./src/gssc_langgraph/graphs/health/graph.py:graph",
+      "description": "Model-free health smoke check (status/service/checkedAt)."
+    },
+    "conversation": {
+      "path": "./src/gssc_langgraph/graphs/conversation/graph.py:graph",
+      "description": "Model-free echo conversation with thread memory."
+    },
+    "closeout_review": {
+      "path": "./src/gssc_langgraph/graphs/closeout_review/graph.py:graph",
+      "description": "Deterministic closeout review (requirements/software/test peers) with optional xAI synthesis."
+    },
+    "test_development": {
+      "path": "./src/gssc_langgraph/graphs/test_development/graph.py:graph",
+      "description": "Test development plan and closeout checks with optional xAI synthesis."
+    },
+    "software_dev": {
+      "path": "./src/gssc_langgraph/graphs/software_dev/graph.py:graph",
+      "description": "Software development plan and closeout checks with optional xAI synthesis."
+    }
   },
   "env": ".env",
   "auth": {
-    "path": "./src/auth/index.ts:auth"
+    "path": "./src/gssc_langgraph/auth/__init__.py:auth"
   },
   "image_distro": "wolfi"
 }

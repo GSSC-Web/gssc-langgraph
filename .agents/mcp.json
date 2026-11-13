@@ -1,0 +1,24 @@
+{
+  "$schema": "https://dotagentsprotocol.com/schemas/mcp.json",
+  "mcpServers": {
+    "kaneo": {
+      "description": "Kaneo ALM for project GLG (GSSC LangGraph): tasks, relations, labels, custom fields, comments, columns.",
+      "url": "${KANEO_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${KANEO_API_TOKEN}"
+      },
+      "env": {
+        "KANEO_MCP_URL": "${KANEO_MCP_URL}",
+        "KANEO_API_TOKEN": "${KANEO_API_TOKEN}",
+        "KANEO_WORKSPACE_ID": "${KANEO_WORKSPACE_ID}",
+        "KANEO_PROJECT_ID": "${KANEO_PROJECT_ID}"
+      },
+      "notes": [
+        "Placeholders only — never commit real tokens.",
+        "Board project key/slug: GLG (GSSC LangGraph). Workspace: GSSC Web. Sister board GSSC5 is out of scope for this repo's tickets.",
+        "Tool intent: list/get/create/update tasks; move status by column slug; task relations (blocks/subtask/related); labels; custom fields (Issue Type, DoR/DoD, Fix Version, Reported Version, Defects Discovered); comments.",
+        "Discover workspace/project via list_workspaces / list_projects / search — do not hardcode opaque ids in skills."
+      ]
+    }
+  }
+}
