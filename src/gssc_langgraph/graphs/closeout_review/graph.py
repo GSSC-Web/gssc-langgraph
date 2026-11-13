@@ -1,8 +1,11 @@
 """Agentic closeout review workflow (model-free checks + optional LLM synthesis).
 
 Invoke via Agent Server assistant id ``closeout_review``, or ``closeout`` CLI.
-Compiled with MemorySaver (``compile_with_memory``): pass
-``configurable.thread_id`` so ``reviewMemory`` accumulates across runs.
+
+The ``langgraph.json`` export compiles **without** a custom checkpointer —
+Agent Server owns thread persistence (``POSTGRES_URI`` for durable store).
+``reviewMemory`` accumulates across Agent Server / SDK threads. For unit
+tests that need an in-process saver, use ``compile_with_memory(builder, …)``.
 """
 
 from __future__ import annotations
@@ -15,7 +18,6 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from gssc_langgraph.checkpoint import compile_with_memory
 from gssc_langgraph.closeout.checks import CHECK_RUNNERS, summarize, verdict_from
 from gssc_langgraph.closeout.synthesize import synthesize_closeout
 from gssc_langgraph.closeout.types import (
@@ -241,4 +243,5 @@ builder.add_edge("check_secrets", "finalize")
 builder.add_edge("finalize", "synthesize")
 builder.add_edge("synthesize", END)
 
-graph = compile_with_memory(builder, {"name": "GSSC Closeout Review"})
+# Agent Server injects its own checkpointer; do not attach InMemorySaver here.
+graph = builder.compile(name="GSSC Closeout Review")
