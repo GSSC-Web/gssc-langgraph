@@ -24,11 +24,63 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
 ├── src/graphs/
 │   ├── health/graph.ts         # assistant id: health
-│   └── sample_agent/graph.ts   # assistant id: sample_agent
+│   ├── sample_agent/graph.ts   # assistant id: sample_agent
+│   └── service_review/graph.ts # assistant id: service_review
+├── src/review/                 # review criteria, collectors, CLI
 └── tests/
 ```
 
 Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`.
+
+## Service review workflow
+
+Runnable agentic review (LangGraph graph + CLI), inspired by [gssc5 closeout-review skills](https://github.com/GSSC-Web/gssc5/tree/master/.agents/skills) (PASS/FAIL, scoped checks, no silent contract rewrites) but implemented here as a **model-free** Bun/TypeScript workflow for this Agent Server.
+
+### What it checks
+
+| Check | Focus |
+| --- | --- |
+| `registry` | `langgraph.json` ↔ `src/graphs/<id>/graph.ts` |
+| `graph_quality` | Annotation/StateGraph/export/`graph.name`; smoke graphs stay model-free |
+| `stack` | TypeScript + Bun + LangGraph.js (flag Python / custom HTTP servers) |
+| `gssc5_contract` | Baseline assistant ids (`health`, `sample_agent`) + sample input shape |
+| `tests` | Changed graphs have bun:test coverage |
+| `secrets` | No committed secrets / real-looking keys |
+
+**Output:** `verdict: PASS|FAIL`, `summary`, and `findings[]` with `check`, `severity`, `path`, `message`, `fix`.
+
+### Trigger locally
+
+```bash
+bun run review                 # git range vs origin/main (+ dirty tree), else workspace
+bun run review --base main
+bun run review --workspace     # full structural scan
+bun run review --diff pr.patch
+bun run review --json          # machine-readable report
+```
+
+Exit `0` on PASS, `1` on FAIL.
+
+### Trigger via Agent Server
+
+With `bun run dev`, call assistant `service_review`:
+
+```bash
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "assistant_id": "service_review",
+    "input": {
+      "label": "api",
+      "files": {
+        "langgraph.json": "{\"graphs\":{}}",
+        "src/graphs/orphan/graph.ts": "export const graph = {}"
+      }
+    }
+  }'
+```
+
+Prefer `bun run review` for git-aware PR/diff collection; the assistant accepts a pre-built `files` map and optional `diff` string.
 
 ## Registered graphs
 
@@ -36,6 +88,7 @@ Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and re
 | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API |
 | `sample_agent` | Model-free echo workflow for gssc5 integration tests |
+| `service_review` | Model-free review workflow (registry, stack, gssc5 contract, …) |
 
 The Agent Server also exposes HTTP `GET /ok` for process health.
 
