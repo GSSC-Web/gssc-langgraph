@@ -7,7 +7,15 @@ authors = [
     { name = "Cursor Agent", email = "cursoragent@cursor.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "langgraph>=0.3",
+    "langgraph-sdk>=0.1",
+    "langgraph-checkpoint-sqlite>=2",
+    "langgraph-checkpoint-postgres>=2",
+    "langchain-xai>=0.2",
+    "langchain-core>=0.3",
+    "psycopg[binary]>=3.2",
+]
 
 [project.scripts]
 gssc-langgraph = "gssc_langgraph:main"

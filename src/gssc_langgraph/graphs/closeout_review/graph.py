@@ -1,0 +1,244 @@
+"""Agentic closeout review workflow (model-free checks + optional LLM synthesis).
+
+Invoke via Agent Server assistant id ``closeout_review``, or ``closeout`` CLI.
+Compiled with MemorySaver (``compile_with_memory``): pass
+``configurable.thread_id`` so ``reviewMemory`` accumulates across runs.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime, timezone
+from operator import add
+from typing import Annotated, Any, TypedDict
+
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END, START, StateGraph
+
+from gssc_langgraph.checkpoint import compile_with_memory
+from gssc_langgraph.closeout.checks import CHECK_RUNNERS, summarize, verdict_from
+from gssc_langgraph.closeout.synthesize import synthesize_closeout
+from gssc_langgraph.closeout.types import (
+    ChangeSet,
+    ChangedFile,
+    CloseoutCheckId,
+    CloseoutFinding,
+    CloseoutVerdict,
+    FileStatus,
+    ProposedMemoryUpdate,
+    ReviewMemoryNote,
+)
+from gssc_langgraph.gssc5 import (
+    ARCH_MEMORY_IDS,
+    CLOSEOUT_PEER_SKILL_IDS,
+    format_gssc5_context,
+    load_gssc5_context_for_role,
+)
+from gssc_langgraph.gssc5.types import Gssc5ContextBundle
+
+
+def replace_list(left: list[Any] | None, right: list[Any] | None) -> list[Any]:
+    return right if right is not None else []
+
+
+def replace_nullable(left: Any, right: Any) -> Any:
+    return right if right is not None else None
+
+
+class CloseoutState(TypedDict, total=False):
+    diff: str
+    files: dict[str, str]
+    label: str
+    fileStatuses: dict[str, FileStatus]
+    kaneoTaskId: str
+    prScope: str
+    uids: Annotated[list[str], replace_list]
+    changeSet: ChangeSet | None
+    findings: Annotated[list[CloseoutFinding], add]
+    checksRun: Annotated[list[CloseoutCheckId], add]
+    verdict: CloseoutVerdict | str
+    summary: str
+    gssc5Context: Annotated[Gssc5ContextBundle | None, replace_nullable]
+    gssc5ContextText: str
+    gssc5Root: str
+    narrativeSummary: str
+    proposedMemoryUpdates: Annotated[list[ProposedMemoryUpdate], replace_list]
+    synthesisNote: str
+    reviewMemory: Annotated[list[ReviewMemoryNote], add]
+    steps: Annotated[list[str], add]
+
+
+_DIFF_PATH_RE = re.compile(r"^diff --git a/(.+?) b/(.+)$", re.MULTILINE)
+
+
+def build_change_set(state: CloseoutState) -> ChangeSet:
+    if state.get("changeSet"):
+        return state["changeSet"]  # type: ignore[return-value]
+
+    files: list[ChangedFile] = []
+    file_map = state.get("files") or {}
+    statuses = state.get("fileStatuses") or {}
+    for path, content in file_map.items():
+        files.append(
+            {
+                "path": path,
+                "content": content,
+                "status": statuses.get(path, "modified"),
+            }
+        )
+
+    diff = state.get("diff") or ""
+    if diff.strip():
+        for match in _DIFF_PATH_RE.finditer(diff):
+            path = match.group(2)
+            if not any(f["path"] == path for f in files):
+                files.append({"path": path, "status": "modified"})
+
+    label = (state.get("label") or "").strip() or ("diff" if diff else "files")
+    result: ChangeSet = {"label": label, "files": files}
+    if diff:
+        result["diff"] = diff
+    return result
+
+
+def parse_changeset(state: CloseoutState) -> dict[str, Any]:
+    return {
+        "changeSet": build_change_set(state),
+        "steps": ["parse_changeset"],
+    }
+
+
+def load_gssc5_context_node(
+    state: CloseoutState,
+    config: RunnableConfig,
+) -> dict[str, Any]:
+    configurable = (config or {}).get("configurable") or {}
+    cs = state.get("changeSet") or build_change_set(state)
+    path_hints = " ".join(f["path"] for f in (cs.get("files") or [])[:20])
+    query = " ".join(
+        part
+        for part in [
+            state.get("label") or "",
+            state.get("kaneoTaskId") or "",
+            state.get("prScope") or "",
+            " ".join(state.get("uids") or []),
+            path_hints,
+            "closeout review requirements software test",
+        ]
+        if part
+    )
+
+    opts: dict[str, Any] = {
+        "query": query,
+        "requireSkills": list(CLOSEOUT_PEER_SKILL_IDS),
+        "requireMemories": list(ARCH_MEMORY_IDS),
+        "maxSkills": 3,
+        "maxMemories": 3,
+    }
+    if configurable.get("gssc5Root") is not None:
+        opts["root"] = configurable["gssc5Root"]
+    if configurable.get("gssc5Enabled") is not None:
+        opts["enabled"] = configurable["gssc5Enabled"]
+    bundle = load_gssc5_context_for_role("reviewer", opts)
+
+    return {
+        "gssc5Context": bundle,
+        "gssc5ContextText": format_gssc5_context(bundle),
+        "gssc5Root": bundle["root"],
+        "steps": ["load_gssc5_context"],
+    }
+
+
+def _make_check_node(check_id: CloseoutCheckId):
+    def node(state: CloseoutState) -> dict[str, Any]:
+        cs = state.get("changeSet") or build_change_set(state)
+        findings = CHECK_RUNNERS[check_id](cs)
+        return {
+            "changeSet": cs,
+            "findings": findings,
+            "checksRun": [check_id],
+            "steps": [f"check_{check_id}"],
+        }
+
+    node.__name__ = f"check_{check_id}"
+    return node
+
+
+def finalize(state: CloseoutState) -> dict[str, Any]:
+    findings = list(state.get("findings") or [])
+    verdict = verdict_from(findings)
+    summary = summarize(verdict, findings)
+    note: ReviewMemoryNote = {
+        "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "verdict": verdict,
+        "summary": summary,
+    }
+    label = (state.get("changeSet") or {}).get("label") or state.get("label")
+    if label:
+        note["label"] = label
+    return {
+        "verdict": verdict,
+        "summary": summary,
+        "reviewMemory": [note],
+        "steps": ["verdict"],
+    }
+
+
+async def synthesize(state: CloseoutState, config: RunnableConfig) -> dict[str, Any]:
+    configurable = (config or {}).get("configurable") or {}
+    synth_input: dict[str, Any] = {
+        "verdict": state.get("verdict") or "",
+        "summary": state.get("summary") or "",
+        "findings": list(state.get("findings") or []),
+        "gssc5ContextText": state.get("gssc5ContextText") or "",
+        "kaneoTaskId": state.get("kaneoTaskId") or "",
+        "prScope": state.get("prScope") or "",
+        "uids": list(state.get("uids") or []),
+    }
+    if configurable.get("synthesisEnabled") is not None:
+        synth_input["enabled"] = configurable["synthesisEnabled"]
+    result = await synthesize_closeout(synth_input)  # type: ignore[arg-type]
+    return {
+        "narrativeSummary": result["narrativeSummary"],
+        "proposedMemoryUpdates": result["proposedMemoryUpdates"],
+        "synthesisNote": result["note"],
+        "steps": ["synthesize"],
+    }
+
+
+_CHECK_ORDER: list[CloseoutCheckId] = [
+    "scope",
+    "contracts",
+    "software_trace",
+    "software_match",
+    "software_quality",
+    "third_party",
+    "test_coverage",
+    "test_target",
+    "secrets",
+]
+
+builder = StateGraph(CloseoutState)
+builder.add_node("parse_changeset", parse_changeset)
+builder.add_node("load_gssc5_context", load_gssc5_context_node)
+for _cid in _CHECK_ORDER:
+    builder.add_node(f"check_{_cid}", _make_check_node(_cid))
+builder.add_node("finalize", finalize)
+builder.add_node("synthesize", synthesize)
+
+builder.add_edge(START, "parse_changeset")
+builder.add_edge("parse_changeset", "load_gssc5_context")
+builder.add_edge("load_gssc5_context", "check_scope")
+builder.add_edge("check_scope", "check_contracts")
+builder.add_edge("check_contracts", "check_software_trace")
+builder.add_edge("check_software_trace", "check_software_match")
+builder.add_edge("check_software_match", "check_software_quality")
+builder.add_edge("check_software_quality", "check_third_party")
+builder.add_edge("check_third_party", "check_test_coverage")
+builder.add_edge("check_test_coverage", "check_test_target")
+builder.add_edge("check_test_target", "check_secrets")
+builder.add_edge("check_secrets", "finalize")
+builder.add_edge("finalize", "synthesize")
+builder.add_edge("synthesize", END)
+
+graph = compile_with_memory(builder, {"name": "GSSC Closeout Review"})
