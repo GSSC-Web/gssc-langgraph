@@ -164,14 +164,18 @@ export function checkMatch(cs: ChangeSet): SoftwareFinding[] {
     if (!body) continue;
     const id = m[1]!;
 
-    if (!/StateGraph\s*\(/.test(body) || !/\.compile\s*\(/.test(body)) {
+    const hasCompile =
+      /\.compile\s*\(/.test(body) ||
+      /\bcompileWithMemory\s*\(/.test(body) ||
+      /\bcompileGraph\s*\(/.test(body);
+    if (!/StateGraph\s*\(/.test(body) || !hasCompile) {
       findings.push({
         check: "match",
         severity: "error",
         path: f.path,
         uid: id,
         message: `Graph "${id}" does not look like a compiled StateGraph assistant`,
-        fix: "Use Annotation + StateGraph + compile() like health.",
+        fix: "Use Annotation + StateGraph + compile()/compileWithMemory like health.",
       });
     }
     if (!/export\s+const\s+graph\b/.test(body)) {
@@ -181,7 +185,7 @@ export function checkMatch(cs: ChangeSet): SoftwareFinding[] {
         path: f.path,
         uid: id,
         message: `Graph "${id}" must export compiled \`graph\` for Agent Server`,
-        fix: "export const graph = builder.compile();",
+        fix: "export const graph = builder.compile(); // or compileWithMemory(...)",
       });
     }
     // Hollow stub: compile with zero addNode calls.
@@ -232,14 +236,19 @@ export function checkQuality(cs: ChangeSet): SoftwareFinding[] {
       });
     }
 
-    if (!/graph\.name\s*=/.test(body)) {
+    if (
+      !/graph\.name\s*=/.test(body) &&
+      !/\b(?:compile|compileWithMemory|compileGraph)\s*\(\s*[^)]*\bname\s*:/.test(
+        body,
+      )
+    ) {
       findings.push({
         check: "quality",
         severity: "warning",
         path: f.path,
         uid: id,
         message: `Graph "${id}" does not set graph.name`,
-        fix: 'Set graph.name = "…" for Studio / ops clarity.',
+        fix: 'Set graph.name = "…" or compileWithMemory(builder, { name: "…" }).',
       });
     }
 

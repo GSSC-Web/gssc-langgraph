@@ -70,7 +70,7 @@ export function buildPlan(goal: string, changeSet: ChangeSet | null): PlanStep[]
       id: "scaffold_graph",
       title: "Scaffold the LangGraph assistant",
       detail:
-        "Add `src/graphs/<id>/graph.ts` with Annotation.Root + StateGraph, `export const graph = builder.compile()`, and `graph.name`. Keep smoke assistants model-free.",
+        "Add `src/graphs/<id>/graph.ts` with Annotation.Root + StateGraph, `export const graph = builder.compile()` (or `compileWithMemory` for conversational graphs), and `graph.name`. Keep smoke assistants model-free.",
     });
     steps.push({
       id: "register",
