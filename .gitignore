@@ -25,5 +25,12 @@ Thumbs.db
 # LangGraph local server / CLI
 .langgraph_api/
 
+# Local durable checkpointer (SQLite default path)
+.data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
 # Local gssc5 auto-checkout cache (if pointed inside the repo)
 .cache/
