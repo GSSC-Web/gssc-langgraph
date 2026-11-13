@@ -55,7 +55,7 @@ export const CRITERIA: Criterion[] = [
 ];
 
 /** Assistant ids treated as the public gssc5 contract baseline (do not drop). */
-export const BASELINE_ASSISTANT_IDS = ["health", "sample_agent"] as const;
+export const BASELINE_ASSISTANT_IDS = ["health"] as const;
 
 /** Prefer these adopted libraries over custom reinvention. */
 export const PREFERRED_STACK = [

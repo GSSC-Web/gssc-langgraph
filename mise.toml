@@ -7,7 +7,6 @@
 #   mise run dev       # Agent Server on :2024
 #   mise run test
 #   mise run typecheck
-#   mise run review
 #   mise run closeout
 #   mise run test-dev
 #   mise run software
@@ -36,10 +35,6 @@ run = "bun test"
 description = "Typecheck with tsc --noEmit"
 alias = "types"
 run = "bun run typecheck"
-
-[tasks.review]
-description = "Run the service review workflow (PASS/FAIL)"
-run = "bun run review"
 
 [tasks.closeout]
 description = "Run the closeout review workflow (PASS/FAIL)"

@@ -1,24 +1,4 @@
-/** Shared types for the service_review workflow. */
-
-export type ReviewVerdict = "PASS" | "FAIL";
-
-export type FindingSeverity = "error" | "warning" | "info";
-
-export type ReviewCheckId =
-  | "registry"
-  | "graph_quality"
-  | "stack"
-  | "gssc5_contract"
-  | "tests"
-  | "secrets";
-
-export type Finding = {
-  check: ReviewCheckId;
-  severity: FindingSeverity;
-  path?: string;
-  message: string;
-  fix?: string;
-};
+/** Shared change-set types for tooling CLIs (collect + software / test_dev). */
 
 export type ChangedFile = {
   path: string;
@@ -35,11 +15,4 @@ export type ChangeSet = {
   files: ChangedFile[];
   /** Raw unified diff when present. */
   diff?: string;
-};
-
-export type ReviewReport = {
-  verdict: ReviewVerdict;
-  summary: string;
-  findings: Finding[];
-  checksRun: ReviewCheckId[];
 };

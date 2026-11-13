@@ -97,6 +97,7 @@ export const BASELINE_ASSISTANT_IDS = ["health"] as const;
 /** Smoke / tooling assistants that must remain model-free when present. */
 export const MODEL_FREE_ASSISTANT_IDS = [
   "health",
+  "conversation",
   "closeout_review",
   "software_dev",
   "test_development",

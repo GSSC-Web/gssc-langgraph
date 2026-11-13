@@ -25,21 +25,21 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── .env.example
 ├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
 ├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
+├── src/checkpoint/             # MemorySaver + compileWithMemory / threadConfig
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
-│   ├── sample_agent/graph.ts        # assistant id: sample_agent
-│   ├── service_review/graph.ts      # assistant id: service_review (being removed)
+│   ├── conversation/graph.ts        # assistant id: conversation (MemorySaver)
 │   ├── closeout_review/graph.ts     # assistant id: closeout_review
 │   ├── test_development/graph.ts    # assistant id: test_development
 │   └── software_dev/graph.ts        # assistant id: software_dev
-├── src/review/                 # shared collectors (+ legacy service_review helpers)
+├── src/review/                 # shared change-set collectors for tooling CLIs
 ├── src/closeout/               # closeout_review criteria, checks, CLI
 ├── src/test_dev/               # test-development contracts, analyzers, CLI
 ├── src/software/               # software_dev plan + closeout criteria, CLI
 └── tests/
 ```
 
-Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`. Prefer `createChatModel()` from `src/llm` when a graph needs an LLM (xAI by default).
+Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`. Prefer `createChatModel()` from `src/llm` when a graph needs an LLM (xAI by default). Conversational / LLM graphs should `compileWithMemory` from `src/checkpoint` so clients can continue via `thread_id`.
 
 ## LLM provider (xAI)
 
@@ -60,7 +60,7 @@ const llm = createChatModel({ temperature: 0 });
 | API key env | `XAI_API_KEY` |
 | Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-Smoke/tooling assistants (`health`, `closeout_review`, `software_dev`, `test_development`) remain **model-free** so `bun run dev` / CI work without provider keys.
+Smoke/tooling assistants (`health`, `conversation`, `closeout_review`, `software_dev`, `test_development`) remain **model-free** so `bun run dev` / CI work without provider keys.
 
 ### Breaking / migration notes
 
@@ -127,7 +127,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
       "goal": "Add a domain graph for membership lookups",
       "label": "api",
       "files": {
-        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\",\"sample_agent\":\"./src/graphs/sample_agent/graph.ts:graph\"}}",
+        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
         "src/graphs/membership/graph.ts": "export const graph = {}"
       }
     }
@@ -138,7 +138,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
 
 Runnable agentic **closeout reviewer** (LangGraph graph + CLI). Behavioral reference: gssc5 peer closeout skills — [requirements-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/requirements-closeout-review/SKILL.md), [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md), [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (scope → peer lanes → PASS/FAIL with proposed fixes; no silent contract rewrites) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
 
-This is a **new** assistant (`closeout_review` / `src/closeout/`), not a revival of `service_review`. Peers: `software_dev` (plan + SW closeout) and `test_development` (test plan/closeout). Baseline contract required here is **`health` only** (`sample_agent` is being removed separately).
+This is a **new** assistant (`closeout_review` / `src/closeout/`), not a revival of `service_review`. Peers: `software_dev` (plan + SW closeout) and `test_development` (test plan/closeout). Baseline contract required here is **`health` only**.
 
 ### What it checks
 
@@ -147,7 +147,7 @@ This is a **new** assistant (`closeout_review` / `src/closeout/`), not a revival
 | `scope` | all | Reviewable change set / workspace present |
 | `contracts` | requirements | Baseline `health` stays registered; no silent README/contract drops |
 | `software_trace` | software | `langgraph.json` ↔ `src/graphs/<id>/graph.ts` (+ README for new ids) |
-| `software_match` | software | Real StateGraph + `export const graph` (not a hollow stub) |
+| `software_match` | software | Real StateGraph + `export const graph` / `compileWithMemory` (not a hollow stub) |
 | `software_quality` | software | Fail-fast, size, `graph.name`, model-free smoke/tooling |
 | `third_party` | software | LangGraph.js / Bun / langgraph-cli over reinvented HTTP or Python |
 | `test_coverage` | test | Changed / workspace graphs have bun:test coverage |
@@ -194,7 +194,7 @@ Prefer `bun run closeout` for git-aware PR/diff collection; the assistant accept
 
 Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
 
-Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health/sample_agent API + structural contracts for other registered graphs).
+Without StrictDoc LLRs, **contracts** are documented assistant behaviors (baseline health API + structural contracts for other registered graphs).
 
 ### What it does
 
@@ -245,16 +245,73 @@ Sibling **software development** bot lives under `software_dev` / `src/software/
 
 ## Registered graphs
 
-| Assistant id | Purpose |
-| --- | --- |
-| `health` | Smoke / liveness payload via the same runs API (baseline contract) |
-| `sample_agent` | Model-free echo workflow (being removed in a parallel PR) |
-| `service_review` | Legacy review workflow (being removed; use `closeout_review`) |
-| `closeout_review` | Model-free closeout review (gssc5 peer closeout skills) |
-| `test_development` | Model-free test-development workflow (contracts → plan / closeout) |
-| `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) |
+| Assistant id | Purpose | Checkpointer |
+| --- | --- | --- |
+| `health` | Smoke / liveness payload via the same runs API (baseline contract) | none (one-shot) |
+| `conversation` | Model-free multi-turn echo demo (thread persistence) | **MemorySaver** |
+| `closeout_review` | Model-free closeout review (gssc5 peer closeout skills) | none (one-shot) |
+| `test_development` | Model-free test-development workflow (contracts → plan / closeout) | none (one-shot) |
+| `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | none (one-shot) |
 
 The Agent Server also exposes HTTP `GET /ok` for process health.
+
+## Threads + MemorySaver (short-term memory)
+
+Conversational assistants persist graph state **per thread** when compiled with a checkpointer. This service uses LangGraph’s in-process [`MemorySaver`](https://docs.langchain.com/oss/javascript/langgraph/add-memory) for local/dev:
+
+```ts
+import { compileWithMemory, threadConfig } from "./checkpoint/index.js";
+// or: import { compileWithMemory, threadConfig } from "./index.js";
+
+export const graph = compileWithMemory(builder, { name: "My Agent" });
+
+// Direct invoke (unit tests / scripts):
+await graph.invoke({ message: "hi" }, threadConfig("conversation-1"));
+await graph.invoke({ message: "again" }, threadConfig("conversation-1"));
+```
+
+| Concern | Detail |
+| --- | --- |
+| Which graphs | `conversation` today; new conversational / LLM graphs should opt in via `compileWithMemory` |
+| One-shot bots | `health`, closeout-style workflows stay on `builder.compile()` (no durable turn memory) |
+| Persistence scope | **In-process** — lost on Agent Server restart. Fine for local `bun run dev` |
+| Production follow-up | Swap to a durable saver (e.g. Postgres / SQLite checkpointer) when multi-replica or restart-safe memory is required — not blocking this setup |
+| Agent Server threads | Create a thread, then stream runs with that `thread_id` (SDK or REST below) |
+
+### Invoke with a thread (SDK)
+
+```ts
+import { Client } from "@langchain/langgraph-sdk";
+
+const client = new Client({
+  apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
+});
+
+const thread = await client.threads.create();
+await client.runs.wait(thread.thread_id, "conversation", {
+  input: { message: "hello" },
+});
+// Same thread_id → prior checkpointed state is loaded for the next turn
+await client.runs.wait(thread.thread_id, "conversation", {
+  input: { message: "follow-up" },
+});
+```
+
+### Invoke with a thread (Agent Server REST)
+
+```bash
+THREAD_ID=$(curl -s -X POST http://127.0.0.1:2024/threads \
+  -H 'Content-Type: application/json' -d '{}' | jq -r .thread_id)
+
+curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "assistant_id": "conversation",
+    "input": { "message": "hello from gssc5" }
+  }'
+```
+
+Pass the same `THREAD_ID` on later runs to continue the conversation. Omit the thread (threadless `POST /runs/stream`) for one-shot invokes such as `health`.
 
 ## Run locally (Bun)
 
@@ -324,11 +381,12 @@ const client = new Client({
 // Threadless health check via the health assistant
 const healthStream = client.runs.stream(null, "health", { input: {} });
 
-// Sample agent with a durable thread
+// Conversation assistant with a thread (MemorySaver persists state for this thread_id)
 const thread = await client.threads.create();
-const runStream = client.runs.stream(thread.thread_id, "sample_agent", {
+const runStream = client.runs.stream(thread.thread_id, "conversation", {
   input: { message: "hello from gssc5" },
 });
+// Reuse thread.thread_id on later runs to continue the conversation.
 ```
 
 ### Option B — REST (threads + runs)
@@ -341,18 +399,7 @@ curl -s -X POST http://127.0.0.1:2024/threads \
   -d '{}'
 ```
 
-Stream a run (threadless):
-
-```bash
-curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assistant_id": "sample_agent",
-    "input": { "message": "hello from gssc5" }
-  }'
-```
-
-Health assistant:
+Stream a run (threadless) — health assistant:
 
 ```bash
 curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
@@ -371,10 +418,11 @@ curl -s http://127.0.0.1:2024/ok
 | Concern | Contract |
 | --- | --- |
 | Transport | HTTP to Agent Server (`GSSC_LANGGRAPH_BASE_URL`) |
-| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, `sample_agent`, …) |
+| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, `conversation`, …) |
 | Stateless | `POST /runs/stream` with `thread_id` omitted / SDK `null` |
-| Stateful | `POST /threads` then threads/runs stream (or SDK equivalents) |
-| Input shape | Per-graph; sample agent expects `{ "message": string }` |
+| Stateful | `POST /threads` then `threads/{id}/runs/stream` (or SDK `runs.stream(thread_id, …)`); graphs compiled with `compileWithMemory` load prior checkpoints |
+| Input shape | Per-graph; health accepts `{}`; `conversation` expects `{ "message": string }` |
+| Checkpointer (local) | In-process `MemorySaver` on `conversation` (and future conversational graphs via `compileWithMemory`) |
 | Auth (local) | None |
 | Auth (prod) | TBD — LangSmith API key and/or custom auth handler |
 

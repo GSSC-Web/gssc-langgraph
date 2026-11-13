@@ -283,14 +283,18 @@ export function checkSoftwareMatch(cs: ChangeSet): CloseoutFinding[] {
     if (!body) continue;
     const id = m[1]!;
 
-    if (!/StateGraph\s*\(/.test(body) || !/\.compile\s*\(/.test(body)) {
+    const hasCompile =
+      /\.compile\s*\(/.test(body) ||
+      /\bcompileWithMemory\s*\(/.test(body) ||
+      /\bcompileGraph\s*\(/.test(body);
+    if (!/StateGraph\s*\(/.test(body) || !hasCompile) {
       findings.push({
         check: "software_match",
         severity: "error",
         path: f.path,
         uid: id,
         message: `Graph "${id}" does not look like a compiled StateGraph assistant`,
-        fix: "Use Annotation + StateGraph + compile() like health.",
+        fix: "Use Annotation + StateGraph + compile()/compileWithMemory like health/conversation.",
       });
     }
     if (!/export\s+const\s+graph\b/.test(body)) {
@@ -300,7 +304,7 @@ export function checkSoftwareMatch(cs: ChangeSet): CloseoutFinding[] {
         path: f.path,
         uid: id,
         message: `Graph "${id}" must export compiled \`graph\` for Agent Server`,
-        fix: "export const graph = builder.compile();",
+        fix: "export const graph = builder.compile(); // or compileWithMemory(...)",
       });
     }
     if (/StateGraph\s*\(/.test(body) && !/\.addNode\s*\(/.test(body)) {
@@ -352,14 +356,19 @@ export function checkSoftwareQuality(cs: ChangeSet): CloseoutFinding[] {
       });
     }
 
-    if (!/graph\.name\s*=/.test(body)) {
+    const hasName =
+      /graph\.name\s*=/.test(body) ||
+      /\b(?:compile|compileWithMemory|compileGraph)\s*\(\s*[^)]*\bname\s*:/.test(
+        body,
+      );
+    if (!hasName) {
       findings.push({
         check: "software_quality",
         severity: "warning",
         path: f.path,
         uid: id,
         message: `Graph "${id}" does not set graph.name`,
-        fix: 'Set graph.name = "…" for Studio / ops clarity.',
+        fix: 'Set graph.name = "…" or compileWithMemory(builder, { name: "…" }).',
       });
     }
 
