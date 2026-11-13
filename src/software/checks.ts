@@ -256,14 +256,14 @@ export function checkQuality(cs: ChangeSet): SoftwareFinding[] {
       /ChatOpenAI|ChatAnthropic|initChatModel|from\s+["']@langchain\/openai["']|from\s+["']@langchain\/anthropic["']/.test(
         body,
       );
-    if (id === "health" && usesChatModel) {
+    if ((id === "health" || id === "conversation") && usesChatModel) {
       findings.push({
         check: "quality",
         severity: "error",
         path: f.path,
         uid: id,
         message: `Smoke assistant "${id}" should stay model-free`,
-        fix: "Keep health free of LLM nodes, or add a separate domain graph.",
+        fix: "Keep health/conversation free of LLM nodes, or add a separate domain graph.",
       });
     }
   }

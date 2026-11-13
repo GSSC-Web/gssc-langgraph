@@ -28,6 +28,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── src/checkpoint/             # MemorySaver + compileWithMemory / threadConfig
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
+│   ├── conversation/graph.ts        # assistant id: conversation (MemorySaver)
 │   ├── test_development/graph.ts    # assistant id: test_development
 │   └── software_dev/graph.ts        # assistant id: software_dev
 ├── src/review/                 # shared change-set collectors for tooling CLIs
@@ -189,6 +190,7 @@ Sibling **software development** bot lives under `software_dev` / `src/software/
 | Assistant id | Purpose | Checkpointer |
 | --- | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API | none (one-shot) |
+| `conversation` | Model-free multi-turn echo demo (thread persistence) | **MemorySaver** |
 | `test_development` | Model-free test-development workflow (contracts → plan / closeout) | none (one-shot) |
 | `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | none (one-shot) |
 
@@ -211,16 +213,13 @@ await graph.invoke({ message: "again" }, threadConfig("conversation-1"));
 
 | Concern | Detail |
 | --- | --- |
-| Which graphs | No registered graph uses MemorySaver yet; new conversational / LLM graphs should opt in via `compileWithMemory` |
+| Which graphs | `conversation` today; new conversational / LLM graphs should opt in via `compileWithMemory` |
 | One-shot bots | `health`, closeout-style workflows stay on `builder.compile()` (no durable turn memory) |
 | Persistence scope | **In-process** — lost on Agent Server restart. Fine for local `bun run dev` |
 | Production follow-up | Swap to a durable saver (e.g. Postgres / SQLite checkpointer) when multi-replica or restart-safe memory is required — not blocking this setup |
 | Agent Server threads | Create a thread, then stream runs with that `thread_id` (SDK or REST below) |
-| Local verification | `tests/graphs.test.ts` covers `compileWithMemory` + `threadConfig` without a dedicated demo assistant |
 
 ### Invoke with a thread (SDK)
-
-Once a conversational graph is registered and compiled with `compileWithMemory`:
 
 ```ts
 import { Client } from "@langchain/langgraph-sdk";
@@ -230,12 +229,12 @@ const client = new Client({
 });
 
 const thread = await client.threads.create();
-await client.runs.wait(thread.thread_id, "<assistant_id>", {
-  input: { /* per-graph */ },
+await client.runs.wait(thread.thread_id, "conversation", {
+  input: { message: "hello" },
 });
 // Same thread_id → prior checkpointed state is loaded for the next turn
-await client.runs.wait(thread.thread_id, "<assistant_id>", {
-  input: { /* follow-up */ },
+await client.runs.wait(thread.thread_id, "conversation", {
+  input: { message: "follow-up" },
 });
 ```
 
@@ -248,8 +247,8 @@ THREAD_ID=$(curl -s -X POST http://127.0.0.1:2024/threads \
 curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
   -H 'Content-Type: application/json' \
   -d '{
-    "assistant_id": "<assistant_id>",
-    "input": {}
+    "assistant_id": "conversation",
+    "input": { "message": "hello from gssc5" }
   }'
 ```
 
@@ -323,10 +322,10 @@ const client = new Client({
 // Threadless health check via the health assistant
 const healthStream = client.runs.stream(null, "health", { input: {} });
 
-// Durable thread for a conversational graph compiled with compileWithMemory
+// Conversation assistant with a thread (MemorySaver persists state for this thread_id)
 const thread = await client.threads.create();
-const runStream = client.runs.stream(thread.thread_id, "<assistant_id>", {
-  input: {},
+const runStream = client.runs.stream(thread.thread_id, "conversation", {
+  input: { message: "hello from gssc5" },
 });
 // Reuse thread.thread_id on later runs to continue the conversation.
 ```
@@ -360,11 +359,11 @@ curl -s http://127.0.0.1:2024/ok
 | Concern | Contract |
 | --- | --- |
 | Transport | HTTP to Agent Server (`GSSC_LANGGRAPH_BASE_URL`) |
-| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, …) |
+| Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, `conversation`, …) |
 | Stateless | `POST /runs/stream` with `thread_id` omitted / SDK `null` |
 | Stateful | `POST /threads` then `threads/{id}/runs/stream` (or SDK `runs.stream(thread_id, …)`); graphs compiled with `compileWithMemory` load prior checkpoints |
-| Input shape | Per-graph; health accepts `{}` |
-| Checkpointer (local) | Shared in-process `MemorySaver` via `compileWithMemory` for future conversational graphs |
+| Input shape | Per-graph; health accepts `{}`; `conversation` expects `{ "message": string }` |
+| Checkpointer (local) | In-process `MemorySaver` on `conversation` (and future conversational graphs via `compileWithMemory`) |
 | Auth (local) | None |
 | Auth (prod) | TBD — LangSmith API key and/or custom auth handler |
 
