@@ -227,10 +227,13 @@ export function checkGraphQuality(cs: ChangeSet): Finding[] {
       });
     }
 
+    // Detect real LLM client wiring (imports / constructors), not prose in comments.
     const usesChatModel =
-      /ChatOpenAI|ChatAnthropic|initChatModel|from\s+["']@langchain\/openai["']|from\s+["']@langchain\/anthropic["']/.test(
+      /\b(?:new\s+Chat(?:OpenAI|Anthropic|XAI)|createChatModel\s*\(|initChatModel\s*\()/.test(
         body,
-      );
+      ) ||
+      /from\s+["']@langchain\/(?:openai|anthropic|xai)["']/.test(body) ||
+      /from\s+["'](?:\.\.\/)+llm(?:\/(?:index|chat))?\.js["']/.test(body);
     if (
       (id === "health" || id === "sample_agent") &&
       usesChatModel
