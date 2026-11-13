@@ -200,3 +200,39 @@ def test_build_plan_mentions_closeout_and_third_party() -> None:
     assert any(s["id"] == "reproduce_fix" for s in plan)
     assert any(s["id"] == "third_party" for s in plan)
     assert any(s["id"] == "closeout" for s in plan)
+
+
+def test_build_plan_specializes_for_gssc5_fe() -> None:
+    cs: ChangeSet = {
+        "label": "gssc5-54",
+        "files": [
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/modules/prompt-overlay/"
+                    "text-field/text-field.html"
+                ),
+                "status": "modified",
+                "content": (
+                    '[class.border-gssc-dark-red]="invalid()"\n'
+                    '[class.bg-gssc-light-red]="invalid()"\n'
+                ),
+            },
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/modules/prompt-overlay/"
+                    "text-field/text-field.test.ts"
+                ),
+                "status": "modified",
+                "content": "expect(el.classList.contains('border-gssc-dark-red')).toBe(true);\n",
+            },
+        ],
+    }
+    plan = build_plan(
+        "Replace Prompt Overlay invalid chrome with gssc failure tokens",
+        cs,
+    )
+    assert any(s["id"] == "implement" for s in plan)
+    assert not any(s["id"] == "scaffold_graph" for s in plan)
+    assert any("Angular" in s["detail"] or "Tailwind" in s["detail"] for s in plan)
+    assert any("ng test" in s["detail"] for s in plan)
+    assert not any("src/gssc_langgraph" in s["detail"] for s in plan)

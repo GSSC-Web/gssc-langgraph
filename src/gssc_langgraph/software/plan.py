@@ -2,7 +2,8 @@
 Deterministic implementation plan for the software_dev workflow.
 
 Mirrors the gssc5 software agent operation loop (scope → implement →
-third-party-first → focused tests → closeout) adapted for Python+uv.
+third-party-first → focused tests → closeout). Specializes steps for
+langgraph service code vs gssc5 FE/BE app work.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import re
 
 from gssc_langgraph.software.types import ChangeSet, PlanStep
+from gssc_langgraph.work_surface import WorkSurface, detect_work_surface
 
 GRAPH_FILE_RE = re.compile(
     r"^(?:src/gssc_langgraph/graphs|src/graphs)/([^/]+)/graph\.py$"
@@ -32,8 +34,140 @@ def _goal_mentions(goal: str, *needles: str) -> bool:
     return any(n in g for n in needles)
 
 
-def build_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
-    """Build ordered plan steps from a goal string and optional change set."""
+def _fe_paths(cs: ChangeSet | None) -> list[str]:
+    if not cs:
+        return []
+    out: list[str] = []
+    for f in cs["files"]:
+        path = f["path"]
+        if f["status"] in ("unchanged", "deleted"):
+            continue
+        if (
+            "gssc5-web/" in path
+            or "/prompt-overlay/" in path
+            or path.endswith(".html")
+            or ".component." in path
+            or path.endswith(".test.ts")
+        ):
+            out.append(path)
+    return out[:12]
+
+
+def _build_fe_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
+    trimmed = goal.strip()
+    paths = _fe_paths(change_set)
+    path_hint = ", ".join(f"`{p}`" for p in paths[:5]) if paths else "touched FE files"
+    steps: list[PlanStep] = [
+        {
+            "id": "scope",
+            "title": "Scope the FE work",
+            "detail": (
+                f'Confirm in-scope gssc5 FE goal: “{trimmed[:200]}'
+                f'{"…" if len(trimmed) > 200 else ""}”. '
+                "Do not plan LangGraph graph scaffolds for Angular/Tailwind UI."
+                if trimmed
+                else (
+                    "No free-text goal — treat the FE change set as software "
+                    "closeout scope (Angular/Tailwind app, not langgraph graphs)."
+                )
+            ),
+        },
+        {
+            "id": "implement",
+            "title": "Implement FE behavior",
+            "detail": (
+                f"Change the smallest set of Angular/Tailwind surfaces "
+                f"({path_hint}). Prefer existing gssc theme tokens "
+                "(`border-gssc-*`, `bg-gssc-*`, `text-gssc-*`) over raw "
+                "utility reds/blues."
+            ),
+        },
+        {
+            "id": "third_party",
+            "title": "Stay on the gssc5 FE stack",
+            "detail": (
+                "Use the gssc5-web Angular + Tailwind toolchain (bun/ng). "
+                "Do not invent Python/LangGraph graphs for FE tickets."
+            ),
+        },
+        {
+            "id": "tests",
+            "title": "Run focused FE tests",
+            "detail": (
+                "Add/update companion `*.test.ts` next to components. Prefer "
+                "`bunx ng test --watch=false --include='**/…/*.test.ts'` on "
+                "the focused module; do not weaken Lexical/class asserts."
+            ),
+        },
+        {
+            "id": "closeout",
+            "title": "Software closeout",
+            "detail": (
+                "Re-run `software_dev` with a structured change set "
+                "(`files` / unified diff). Peer with `test_development` for "
+                "FE test closeout — not pytest graph.invoke stubs."
+            ),
+        },
+    ]
+    return steps
+
+
+def _build_be_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
+    trimmed = goal.strip()
+    steps: list[PlanStep] = [
+        {
+            "id": "scope",
+            "title": "Scope the BE work",
+            "detail": (
+                f'Confirm in-scope gssc5 API/backend goal: “{trimmed[:200]}'
+                f'{"…" if len(trimmed) > 200 else ""}”. '
+                "Do not default to LangGraph graph paths unless the ticket "
+                "touches this service."
+                if trimmed
+                else (
+                    "No free-text goal — treat the gssc5 backend change set "
+                    "as software closeout scope."
+                )
+            ),
+        },
+        {
+            "id": "implement",
+            "title": "Implement BE behavior",
+            "detail": (
+                "Change the smallest set of gssc5 API/backend modules for "
+                "the ticket. Keep contracts with the public/members apps "
+                "stable unless the task explicitly widens them."
+            ),
+        },
+        {
+            "id": "third_party",
+            "title": "Stay on the gssc5 BE stack",
+            "detail": (
+                "Prefer the existing gssc5 backend toolchain. Do not scaffold "
+                "Python LangGraph assistants for pure gssc5 API work."
+            ),
+        },
+        {
+            "id": "tests",
+            "title": "Run focused BE tests",
+            "detail": (
+                "Add/update the project's existing unit/integration tests for "
+                "touched handlers; keep asserts tied to the API contract."
+            ),
+        },
+        {
+            "id": "closeout",
+            "title": "Software closeout",
+            "detail": (
+                "Re-run `software_dev` with populated `files` or a unified "
+                "diff; peer with `test_development` for test closeout."
+            ),
+        },
+    ]
+    return steps
+
+
+def _build_langgraph_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
     steps: list[PlanStep] = []
     trimmed = goal.strip()
     graphs = _changed_graph_ids(change_set)
@@ -175,3 +309,20 @@ def build_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
         }
     )
     return steps
+
+
+def build_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
+    """Build ordered plan steps from a goal string and optional change set."""
+    surface: WorkSurface = detect_work_surface(goal, change_set)
+    if surface == "gssc5_fe":
+        return _build_fe_plan(goal, change_set)
+    if surface == "gssc5_be":
+        return _build_be_plan(goal, change_set)
+    # mixed / unknown / langgraph → langgraph service planner (safe default
+    # for this repo); mixed still gets langgraph steps plus FE path hints
+    # only when pure FE was not detected.
+    if surface == "mixed" and _fe_paths(change_set) and not _changed_graph_ids(
+        change_set
+    ):
+        return _build_fe_plan(goal, change_set)
+    return _build_langgraph_plan(goal, change_set)

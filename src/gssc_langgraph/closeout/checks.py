@@ -26,6 +26,7 @@ from gssc_langgraph.closeout.types import (
     CloseoutFinding,
     CloseoutVerdict,
 )
+from gssc_langgraph.work_surface import detect_work_surface, looks_like_unified_diff
 
 GRAPH_FILE_RE = re.compile(
     r"^(?:src/gssc_langgraph/graphs|src/graphs)/([^/]+)/graph\.py$"
@@ -146,17 +147,62 @@ def _has_test_touching(cs: ChangeSet, graph_id: str) -> bool:
     return False
 
 
+_PROSE_DIFF_FIX = (
+    "Required input: populated `files` / `changeSet.files`, or a real "
+    "unified diff with `diff --git` headers (CLI: `--workspace` / "
+    "`--diff path.patch`). Prose or summary text in `diff` is not enough "
+    "for file-scoped checks — retry with a structured change set."
+)
+
+
 def check_scope(cs: ChangeSet | None) -> list[CloseoutFinding]:
     findings: list[CloseoutFinding] = []
-    if not cs or not cs.get("files"):
+    if cs and cs.get("files"):
+        return findings
+
+    diff = (cs or {}).get("diff") or ""
+    if diff.strip() and not looks_like_unified_diff(diff):
+        # Soft first pass: prose/summary diffs used to hard-FAIL; guide retry.
         findings.append(
             {
                 "check": "scope",
-                "severity": "error",
-                "message": "No change set — nothing in scope for closeout review",
-                "fix": "Pass a git range / --workspace / --diff / paths.",
+                "severity": "warning",
+                "message": (
+                    "Prose/summary `diff` has no `diff --git` paths and no "
+                    "`files` / `changeSet.files` — closeout cannot scope "
+                    "file checks on this pass"
+                ),
+                "fix": _PROSE_DIFF_FIX,
             }
         )
+        return findings
+
+    if diff.strip() and looks_like_unified_diff(diff):
+        findings.append(
+            {
+                "check": "scope",
+                "severity": "warning",
+                "message": (
+                    "Unified diff present but no file paths were extracted "
+                    "into the change set"
+                ),
+                "fix": _PROSE_DIFF_FIX,
+            }
+        )
+        return findings
+
+    findings.append(
+        {
+            "check": "scope",
+            "severity": "error",
+            "message": "No change set — nothing in scope for closeout review",
+            "fix": (
+                "Pass populated `files` / `changeSet.files`, a git range / "
+                "--workspace / --diff with unified `diff --git` content, "
+                "or explicit paths."
+            ),
+        }
+    )
     return findings
 
 
@@ -582,35 +628,49 @@ def check_third_party(cs: ChangeSet) -> list[CloseoutFinding]:
                 }
             )
     else:
-        # Require Python packaging when reviewing a workspace / packaging surface.
-        packaging_in_scope = any(
-            f["path"]
-            in (
-                "package.json",
-                "pyproject.toml",
-                "requirements.txt",
-                "langgraph.json",
+        surface = detect_work_surface(change_set=cs)
+        # Pure gssc5 FE/BE reviews are not this service's Python packaging surface.
+        if surface not in ("gssc5_fe", "gssc5_be"):
+            packaging_in_scope = any(
+                f["path"]
+                in (
+                    "package.json",
+                    "pyproject.toml",
+                    "requirements.txt",
+                    "langgraph.json",
+                )
+                or f["path"].startswith("src/gssc_langgraph/")
+                or f["path"].startswith("src/graphs/")
+                for f in cs["files"]
             )
-            or f["path"].startswith("src/")
-            for f in cs["files"]
-        )
-        if packaging_in_scope and (
-            cs.get("label") == "workspace" or pkg_text or any(
-                f["path"].endswith(".py") for f in cs["files"]
-            )
-        ):
-            findings.append(
-                {
-                    "check": "third_party",
-                    "severity": "error",
-                    "path": "pyproject.toml",
-                    "message": "Missing pyproject.toml — Python+uv is the required stack",
-                    "fix": "Add pyproject.toml with a langgraph dependency; prefer uv.",
-                }
-            )
+            if packaging_in_scope and (
+                cs.get("label") == "workspace"
+                or pkg_text
+                or any(f["path"].endswith(".py") for f in cs["files"])
+            ):
+                findings.append(
+                    {
+                        "check": "third_party",
+                        "severity": "error",
+                        "path": "pyproject.toml",
+                        "message": (
+                            "Missing pyproject.toml — Python+uv is the "
+                            "required stack"
+                        ),
+                        "fix": (
+                            "Add pyproject.toml with a langgraph dependency; "
+                            "prefer uv."
+                        ),
+                    }
+                )
 
-    # Leftover Bun/TS as the only packaging story.
-    if pkg_text and not pyproject_text:
+    # Leftover Bun/TS as the only packaging story (langgraph service only).
+    surface = detect_work_surface(change_set=cs)
+    if (
+        pkg_text
+        and not pyproject_text
+        and surface not in ("gssc5_fe", "gssc5_be")
+    ):
         bun_only = bool(re.search(r'"packageManager"\s*:\s*"bun@', pkg_text))
         findings.append(
             {

@@ -2,6 +2,10 @@
 
 Invoke via Agent Server assistant id ``closeout_review``, or ``closeout`` CLI.
 
+Required input: populated ``files`` / ``changeSet.files``, or a real unified
+diff with ``diff --git`` headers. Prose/summary ``diff`` alone yields a soft
+scope warning (not FAIL) and asks for a structured retry.
+
 The ``langgraph.json`` export compiles **without** a custom checkpointer —
 Agent Server owns thread persistence (``POSTGRES_URI`` for durable store).
 ``reviewMemory`` accumulates across Agent Server / SDK threads. For unit

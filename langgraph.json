@@ -13,15 +13,15 @@
     },
     "closeout_review": {
       "path": "./src/gssc_langgraph/graphs/closeout_review/graph.py:graph",
-      "description": "Deterministic closeout review (requirements/software/test peers) with optional xAI synthesis."
+      "description": "Deterministic closeout review with optional xAI synthesis. REQUIRED: populated files/changeSet.files OR a real unified diff with diff --git headers — prose/summary diff alone is not enough (soft warning on first pass)."
     },
     "test_development": {
       "path": "./src/gssc_langgraph/graphs/test_development/graph.py:graph",
-      "description": "Test development plan and closeout checks with optional xAI synthesis."
+      "description": "Test plan/closeout with optional xAI synthesis. Specializes for gssc5 FE/BE (Angular *.test.ts / bunx ng test) vs langgraph service (pytest/graph.invoke)."
     },
     "software_dev": {
       "path": "./src/gssc_langgraph/graphs/software_dev/graph.py:graph",
-      "description": "Software development plan and closeout checks with optional xAI synthesis."
+      "description": "Software plan/closeout with optional xAI synthesis. Specializes for gssc5 FE/BE (Angular/Tailwind) vs langgraph Python service graphs."
     }
   },
   "env": ".env",
