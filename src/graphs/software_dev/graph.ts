@@ -1,0 +1,182 @@
+/**
+ * Agentic software development workflow (model-free).
+ *
+ * Behavioral reference: gssc5 software agent + software-closeout-review
+ * (scope → implement → third-party-first → PASS/FAIL). Implemented here as a
+ * Bun/TypeScript LangGraph — not a Dot Agents `.agents/` scaffold.
+ *
+ * Invoke via Agent Server assistant id `software_dev`, or `bun run software`.
+ *
+ * Naming note: sibling `test_dev` owns test-bot paths; this graph stays under
+ * `software_dev` / `src/software/`.
+ */
+import { Annotation, StateGraph } from "@langchain/langgraph";
+import {
+  CHECK_RUNNERS,
+  summarize,
+  verdictFrom,
+} from "../../software/checks.js";
+import { buildPlan } from "../../software/plan.js";
+import type {
+  ChangeSet,
+  ChangedFile,
+  PlanStep,
+  SoftwareCheckId,
+  SoftwareFinding,
+  SoftwareVerdict,
+} from "../../software/types.js";
+
+const FindingAnnotation = Annotation<SoftwareFinding[]>({
+  reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
+  default: () => [],
+});
+
+const StepsAnnotation = Annotation<string[]>({
+  reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
+  default: () => [],
+});
+
+const PlanAnnotation = Annotation<PlanStep[]>({
+  reducer: (_left, right) => right ?? [],
+  default: () => [],
+});
+
+const SoftwareState = Annotation.Root({
+  /** Free-text development goal / task brief. */
+  goal: Annotation<string>(),
+  /** Optional requirements / LLR excerpt (informational for plan). */
+  requirements: Annotation<string>(),
+  /** Optional unified diff. */
+  diff: Annotation<string>(),
+  /** Optional file map (path → contents). */
+  files: Annotation<Record<string, string>>(),
+  /** Optional pre-built change set label. */
+  label: Annotation<string>(),
+  /** Optional explicit file statuses when providing `files`. */
+  fileStatuses: Annotation<Record<string, ChangedFile["status"]>>(),
+
+  /** Internal / output */
+  changeSet: Annotation<ChangeSet | null>(),
+  plan: PlanAnnotation,
+  findings: FindingAnnotation,
+  checksRun: Annotation<SoftwareCheckId[]>({
+    reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
+    default: () => [],
+  }),
+  verdict: Annotation<SoftwareVerdict | "">(),
+  summary: Annotation<string>(),
+  steps: StepsAnnotation,
+});
+
+function buildChangeSet(state: typeof SoftwareState.State): ChangeSet | null {
+  if (state.changeSet) return state.changeSet;
+
+  const files: ChangedFile[] = [];
+  const map = state.files ?? {};
+  const statuses = state.fileStatuses ?? {};
+  for (const [path, content] of Object.entries(map)) {
+    files.push({
+      path,
+      content,
+      status: statuses[path] ?? "modified",
+    });
+  }
+
+  if (state.diff?.trim()) {
+    const pathRe = /^diff --git a\/(.+?) b\/(.+)$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = pathRe.exec(state.diff)) !== null) {
+      const path = m[2]!;
+      if (!files.some((f) => f.path === path)) {
+        files.push({
+          path,
+          status: "modified",
+        });
+      }
+    }
+  }
+
+  if (files.length === 0 && !state.diff?.trim()) return null;
+
+  return {
+    label: state.label?.trim() || (state.diff ? "diff" : "files"),
+    files,
+    diff: state.diff,
+  };
+}
+
+const parseInput = async (
+  state: typeof SoftwareState.State,
+): Promise<typeof SoftwareState.Update> => {
+  const changeSet = buildChangeSet(state);
+  return {
+    changeSet,
+    goal: state.goal ?? "",
+    steps: ["parse_input"],
+  };
+};
+
+const planWork = async (
+  state: typeof SoftwareState.State,
+): Promise<typeof SoftwareState.Update> => {
+  const goal = (state.goal ?? "").trim();
+  const req = (state.requirements ?? "").trim();
+  const combined = [goal, req].filter(Boolean).join("\n");
+  const plan = buildPlan(combined || goal, state.changeSet ?? null);
+  return {
+    plan,
+    steps: ["plan_work"],
+  };
+};
+
+function makeCheckNode(checkId: SoftwareCheckId) {
+  return async (
+    state: typeof SoftwareState.State,
+  ): Promise<typeof SoftwareState.Update> => {
+    const findings = CHECK_RUNNERS[checkId](
+      state.goal ?? "",
+      state.changeSet ?? null,
+    );
+    return {
+      findings,
+      checksRun: [checkId],
+      steps: [`check_${checkId}`],
+    };
+  };
+}
+
+const finalize = async (
+  state: typeof SoftwareState.State,
+): Promise<typeof SoftwareState.Update> => {
+  const findings = state.findings ?? [];
+  const plan = state.plan ?? [];
+  const verdict = verdictFrom(findings);
+  return {
+    verdict,
+    summary: summarize(verdict, findings, plan.length),
+    steps: ["verdict"],
+  };
+};
+
+const builder = new StateGraph(SoftwareState)
+  .addNode("parse_input", parseInput)
+  .addNode("plan_work", planWork)
+  .addNode("check_scope", makeCheckNode("scope"))
+  .addNode("check_trace", makeCheckNode("trace"))
+  .addNode("check_match", makeCheckNode("match"))
+  .addNode("check_quality", makeCheckNode("quality"))
+  .addNode("check_third_party", makeCheckNode("third_party"))
+  .addNode("check_discipline", makeCheckNode("discipline"))
+  .addNode("finalize", finalize)
+  .addEdge("__start__", "parse_input")
+  .addEdge("parse_input", "plan_work")
+  .addEdge("plan_work", "check_scope")
+  .addEdge("check_scope", "check_trace")
+  .addEdge("check_trace", "check_match")
+  .addEdge("check_match", "check_quality")
+  .addEdge("check_quality", "check_third_party")
+  .addEdge("check_third_party", "check_discipline")
+  .addEdge("check_discipline", "finalize");
+
+export const graph = builder.compile();
+graph.name = "GSSC Software Dev";

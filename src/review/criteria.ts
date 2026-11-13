@@ -68,6 +68,8 @@ export const CUSTOM_SERVER_HINTS = [
 export const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "openai-key", re: /sk-[A-Za-z0-9]{20,}/ },
   { name: "anthropic-key", re: /sk-ant-[A-Za-z0-9_-]{20,}/ },
+  // xAI console keys commonly look like xai-… (keep .env.example empty).
+  { name: "xai-key", re: /xai-[A-Za-z0-9_-]{20,}/ },
   { name: "aws-key", re: /AKIA[0-9A-Z]{16}/ },
   {
     name: "private-key-block",

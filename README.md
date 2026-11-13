@@ -8,6 +8,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 | --- | --- |
 | Runtime | **TypeScript + Bun** (`packageManager: bun`), LangGraph.js — not Python |
 | Serving | Official **Agent Server** via `@langchain/langgraph-cli` (`bun run dev`) — no custom HTTP framework |
+| LLM (domain graphs) | **xAI / Grok** via `@langchain/xai` `ChatXAI` (`createChatModel()` in `src/llm`) — default model `grok-4.7` |
 | Auth (local) | **None** for local CLI serve (loopback). Production: LangSmith / custom `langgraph.json` `auth` later |
 | CORS | Prefer **gssc5 backend → this service** (server-side). Browser CORS not required for that pattern |
 | Default URL | `http://127.0.0.1:2024` (`langgraph-cli dev` default) |
@@ -23,17 +24,113 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── tsconfig.json
 ├── .env.example
 ├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
+├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
 │   ├── sample_agent/graph.ts        # assistant id: sample_agent
 │   ├── service_review/graph.ts      # assistant id: service_review
-│   └── test_development/graph.ts    # assistant id: test_development
+│   ├── test_development/graph.ts    # assistant id: test_development
+│   └── software_dev/graph.ts        # assistant id: software_dev
 ├── src/review/                 # service review criteria, collectors, CLI
 ├── src/test_dev/               # test-development contracts, analyzers, CLI
+├── src/software/               # software_dev plan + closeout criteria, CLI
 └── tests/
 ```
 
-Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`.
+Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`. Prefer `createChatModel()` from `src/llm` when a graph needs an LLM (xAI by default).
+
+## LLM provider (xAI)
+
+Domain graphs that call a chat model should use the shared helper:
+
+```ts
+import { createChatModel } from "../llm/index.js";
+// or: import { createChatModel } from "../../index.js";
+
+const llm = createChatModel({ temperature: 0 });
+// optional: createChatModel({ model: "grok-4.6" })
+```
+
+| Concern | Default |
+| --- | --- |
+| Provider | xAI (`ChatXAI` from `@langchain/xai`) |
+| Model id | `grok-4.7` (xAI’s current general / agentic recommendation) |
+| API key env | `XAI_API_KEY` |
+| Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
+
+Smoke assistants (`health`, `sample_agent`, `service_review`) remain **model-free** so `bun run dev` / CI work without provider keys.
+
+### Breaking / migration notes
+
+- No change to existing assistant ids or smoke-graph I/O.
+- New dependency: `@langchain/xai`.
+- Domain graphs that previously would have used OpenAI/Anthropic should call `createChatModel()` (or pass an explicit provider) instead of hard-coding `ChatOpenAI` / `ChatAnthropic`.
+- Set `XAI_API_KEY` before invoking any graph that uses the helper.
+
+### LangSmith tracing + “model of choice” (manual UI)
+
+In-repo defaults cover **code** (`ChatXAI` + env). LangSmith’s workspace **Default Model** for Playground / Evaluators / Chat / Insights is configured in the dashboard and cannot live in this repo:
+
+1. Add a workspace secret named `XAI_API_KEY` under **Settings → Integrations → Provider secrets** (provider: xAI).
+2. Open **Settings → Model configurations**, create a configuration with **Provider: xAI**, model **`grok-4.7`** (or your override), API key name `XAI_API_KEY`.
+3. In the **Feature Access** table, enable **xAI** for the features you use and set **Default Model** to that configuration.
+4. For local/Agent Server traces: set `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, and `LANGSMITH_PROJECT` in `.env` (see `.env.example`). Traces from `ChatXAI` report `ls_provider=xai` and the selected model id.
+
+## Software development bot
+
+Runnable agentic software workflow (LangGraph graph + CLI). Behavioral reference: [gssc5 software agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/software/agent.md) and [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md) (scope → implement → third-party-first → PASS/FAIL, no silent contract rewrites) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
+
+The sibling **test** development bot is a separate assistant (`test_development` / `src/test_dev/`); this bot owns `software_dev` / `src/software/` only.
+
+### What it does
+
+1. Emits a deterministic **implementation plan** from `--goal` (and optional change set).
+2. Runs software closeout checks:
+
+| Check | Focus |
+| --- | --- |
+| `scope` | Goal and/or reviewable change set present |
+| `trace` | New assistants registered in `langgraph.json` + README mention |
+| `match` | Real StateGraph + `export const graph` (not a hollow stub) |
+| `quality` | Fail-fast, size, `graph.name`, model-free smoke assistants |
+| `third_party` | LangGraph.js / Bun / langgraph-cli over reinvented HTTP or Python |
+| `discipline` | No silent baseline/contract drops; no deleting covering tests to “fix” SW |
+
+**Output:** `verdict: PASS|FAIL`, `summary`, `plan[]`, and `findings[]`.
+
+### Trigger locally
+
+```bash
+bun run software --goal "Add foo assistant that …"
+bun run software --goal "…" --workspace
+bun run software --workspace          # closeout scan of the tree
+bun run software --diff pr.patch
+bun run software --plan-only --goal "Fix health checkedAt skew"
+bun run software --json
+# or: mise run software -- --goal "…"
+```
+
+Default git base is `origin/master`. Exit `0` on PASS, `1` on FAIL.
+
+### Trigger via Agent Server
+
+With `bun run dev`, call assistant `software_dev`:
+
+```bash
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "assistant_id": "software_dev",
+    "input": {
+      "goal": "Add a domain graph for membership lookups",
+      "label": "api",
+      "files": {
+        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\",\"sample_agent\":\"./src/graphs/sample_agent/graph.ts:graph\"}}",
+        "src/graphs/membership/graph.ts": "export const graph = {}"
+      }
+    }
+  }'
+```
 
 ## Service review workflow
 
@@ -136,7 +233,7 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
 
 Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string (same shape as `service_review`).
 
-Sibling **software development** bot (separate PR / tree under `src/software_dev/` + `software_development` graph) is intentionally out of scope here.
+Sibling **software development** bot lives under `software_dev` / `src/software/` (separate ownership); this workflow does not implement software closeout.
 
 ## Registered graphs
 
@@ -146,17 +243,19 @@ Sibling **software development** bot (separate PR / tree under `src/software_dev
 | `sample_agent` | Model-free echo workflow for gssc5 integration tests |
 | `service_review` | Model-free review workflow (registry, stack, gssc5 contract, …) |
 | `test_development` | Model-free test-development workflow (contracts → plan / closeout) |
+| `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) |
 
 The Agent Server also exposes HTTP `GET /ok` for process health.
 
 ## Run locally (Bun)
 
-Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|review|test-dev` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
+Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|review|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
 
 ```bash
 bun install          # or: mise run install
 cp .env.example .env
-# optional: set LANGSMITH_API_KEY for tracing / Studio
+# optional: LANGSMITH_API_KEY (+ LANGSMITH_TRACING=true) for tracing / Studio
+# for domain LLM graphs: set XAI_API_KEY (smoke graphs do not need it)
 
 bun run dev          # or: mise run dev
 ```
@@ -275,3 +374,6 @@ Official references:
 - [Local server (JS)](https://docs.langchain.com/oss/javascript/langgraph/local-server)
 - [Application structure](https://docs.langchain.com/langsmith/setup-javascript)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
+- [ChatXAI (xAI / Grok)](https://docs.langchain.com/oss/javascript/integrations/chat/xai)
+- [LangSmith model configurations](https://docs.langchain.com/langsmith/model-configurations)
+- [xAI models](https://docs.x.ai/docs/models)

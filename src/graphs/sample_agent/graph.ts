@@ -2,7 +2,8 @@
  * Sample single-step agent graph.
  *
  * Intentionally model-free so local `bun run dev` works without API keys.
- * Replace `respond` with tool/LLM nodes when adding GSSC domain workflows.
+ * Domain graphs that need an LLM should use the shared helper under `src/llm`
+ * (xAI / Grok by default) — keep this smoke assistant free of provider clients.
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";

@@ -53,7 +53,7 @@ const GRAPH_FILE_RE = /^src\/graphs\/([^/]+)\/graph\.tsx?$/;
 export const TOOLING_GRAPH_IDS = new Set([
   "service_review",
   "test_development",
-  "software_development",
+  "software_dev",
 ]);
 
 function textOf(
