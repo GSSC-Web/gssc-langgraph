@@ -1,5 +1,6 @@
 /**
- * Agentic software development workflow (model-free).
+ * Agentic software development workflow (model-free plan/checks + optional LLM
+ * synthesis).
  *
  * Behavioral reference: gssc5 software agent + software-closeout-review
  * (scope → implement → third-party-first → PASS/FAIL). Implemented here as a
@@ -11,6 +12,9 @@
  *
  * Naming note: sibling `test_dev` owns test-bot paths; this graph stays under
  * `software_dev` / `src/software/`.
+ *
+ * Optional synthesis (xAI chat helper) runs after deterministic checks and
+ * skips cleanly when `XAI_API_KEY` is absent.
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
 import { compileWithMemory } from "../../checkpoint/index.js";
@@ -25,10 +29,12 @@ import {
   verdictFrom,
 } from "../../software/checks.js";
 import { buildPlan } from "../../software/plan.js";
+import { synthesizeSoftware } from "../../software/synthesize.js";
 import type {
   ChangeSet,
   ChangedFile,
   PlanStep,
+  ProposedMemoryUpdate,
   SoftwareCheckId,
   SoftwareFinding,
   SoftwareVerdict,
@@ -52,6 +58,11 @@ const PlanAnnotation = Annotation<PlanStep[]>({
 
 const SpecialistNotesAnnotation = Annotation<SpecialistNote[]>({
   reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
+  default: () => [],
+});
+
+const ProposedMemoryAnnotation = Annotation<ProposedMemoryUpdate[]>({
+  reducer: (_left, right) => right ?? [],
   default: () => [],
 });
 
@@ -86,6 +97,10 @@ const SoftwareState = Annotation.Root({
   }),
   gssc5ContextText: Annotation<string>(),
   gssc5Root: Annotation<string>(),
+  /** Optional LLM narrative (falls back to deterministic summary when skipped). */
+  narrativeSummary: Annotation<string>(),
+  proposedMemoryUpdates: ProposedMemoryAnnotation,
+  synthesisNote: Annotation<string>(),
   /** Durable specialist notes across thread turns (append-only). */
   specialistNotes: SpecialistNotesAnnotation,
   steps: StepsAnnotation,
@@ -211,6 +226,27 @@ const finalize = async (
   };
 };
 
+const synthesize = async (
+  state: typeof SoftwareState.State,
+  config?: { configurable?: { synthesisEnabled?: boolean } },
+): Promise<typeof SoftwareState.Update> => {
+  const result = await synthesizeSoftware({
+    verdict: state.verdict ?? "",
+    summary: state.summary ?? "",
+    goal: state.goal,
+    plan: state.plan,
+    findings: state.findings ?? [],
+    gssc5ContextText: state.gssc5ContextText,
+    enabled: config?.configurable?.synthesisEnabled,
+  });
+  return {
+    narrativeSummary: result.narrativeSummary,
+    proposedMemoryUpdates: result.proposedMemoryUpdates,
+    synthesisNote: result.note,
+    steps: ["synthesize"],
+  };
+};
+
 const builder = new StateGraph(SoftwareState)
   .addNode("parse_input", parseInput)
   .addNode("load_gssc5_context", loadGssc5Context)
@@ -222,6 +258,7 @@ const builder = new StateGraph(SoftwareState)
   .addNode("check_third_party", makeCheckNode("third_party"))
   .addNode("check_discipline", makeCheckNode("discipline"))
   .addNode("finalize", finalize)
+  .addNode("synthesize", synthesize)
   .addEdge("__start__", "parse_input")
   .addEdge("parse_input", "load_gssc5_context")
   .addEdge("load_gssc5_context", "plan_work")
@@ -231,7 +268,8 @@ const builder = new StateGraph(SoftwareState)
   .addEdge("check_match", "check_quality")
   .addEdge("check_quality", "check_third_party")
   .addEdge("check_third_party", "check_discipline")
-  .addEdge("check_discipline", "finalize");
+  .addEdge("check_discipline", "finalize")
+  .addEdge("finalize", "synthesize");
 
 export const graph = compileWithMemory(builder, {
   name: "GSSC Software Dev",

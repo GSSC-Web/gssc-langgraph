@@ -1,5 +1,6 @@
 /**
- * Agentic test-development workflow (model-free).
+ * Agentic test-development workflow (model-free analysis + optional LLM
+ * synthesis).
  *
  * Behavioral reference: gssc5 test agent + test-closeout-review (one permanent
  * test per in-scope requirement, assert the contract not incidental SW,
@@ -11,6 +12,9 @@
  * Invoke via assistant id `test_development`, or `bun run test-dev`.
  * Compiled with MemorySaver (`compileWithMemory`): pass `configurable.thread_id`
  * so `specialistNotes` accumulate across runs on the same thread.
+ *
+ * Optional synthesis (xAI chat helper) runs after deterministic analysis and
+ * skips cleanly when `XAI_API_KEY` is absent.
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
 import { compileWithMemory } from "../../checkpoint/index.js";
@@ -24,6 +28,7 @@ import {
   summarize,
   verdictFrom,
 } from "../../test_dev/analyze.js";
+import { synthesizeTestDev } from "../../test_dev/synthesize.js";
 import type {
   ChangeSet,
   ChangedFile,
@@ -31,6 +36,7 @@ import type {
   CoverageLink,
   Finding,
   PlanItem,
+  ProposedMemoryUpdate,
   SpecialistNote,
   TestDevCheckId,
   TestDevVerdict,
@@ -48,6 +54,11 @@ const StepsAnnotation = Annotation<string[]>({
 
 const SpecialistNotesAnnotation = Annotation<SpecialistNote[]>({
   reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
+  default: () => [],
+});
+
+const ProposedMemoryAnnotation = Annotation<ProposedMemoryUpdate[]>({
+  reducer: (_left, right) => right ?? [],
   default: () => [],
 });
 
@@ -97,6 +108,10 @@ const TestDevState = Annotation.Root({
   }),
   gssc5ContextText: Annotation<string>(),
   gssc5Root: Annotation<string>(),
+  /** Optional LLM narrative (falls back to deterministic summary when skipped). */
+  narrativeSummary: Annotation<string>(),
+  proposedMemoryUpdates: ProposedMemoryAnnotation,
+  synthesisNote: Annotation<string>(),
   /** Durable specialist notes across thread turns (append-only). */
   specialistNotes: SpecialistNotesAnnotation,
   steps: StepsAnnotation,
@@ -211,15 +226,39 @@ const finalize = async (
   };
 };
 
+const synthesize = async (
+  state: typeof TestDevState.State,
+  config?: { configurable?: { synthesisEnabled?: boolean } },
+): Promise<typeof TestDevState.Update> => {
+  const result = await synthesizeTestDev({
+    verdict: state.verdict ?? "",
+    summary: state.summary ?? "",
+    findings: state.findings ?? [],
+    plan: state.plan,
+    scopeGraphIds: state.scopeGraphIds,
+    commands: state.commands,
+    gssc5ContextText: state.gssc5ContextText,
+    enabled: config?.configurable?.synthesisEnabled,
+  });
+  return {
+    narrativeSummary: result.narrativeSummary,
+    proposedMemoryUpdates: result.proposedMemoryUpdates,
+    synthesisNote: result.note,
+    steps: ["synthesize"],
+  };
+};
+
 const builder = new StateGraph(TestDevState)
   .addNode("parse_changeset", parseChangeset)
   .addNode("load_gssc5_context", loadGssc5Context)
   .addNode("analyze", analyzeScope)
   .addNode("finalize", finalize)
+  .addNode("synthesize", synthesize)
   .addEdge("__start__", "parse_changeset")
   .addEdge("parse_changeset", "load_gssc5_context")
   .addEdge("load_gssc5_context", "analyze")
-  .addEdge("analyze", "finalize");
+  .addEdge("analyze", "finalize")
+  .addEdge("finalize", "synthesize");
 
 export const graph = compileWithMemory(builder, {
   name: "GSSC Test Development",

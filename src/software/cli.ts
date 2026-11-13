@@ -82,8 +82,9 @@ function parseArgs(argv: string[]): Args {
 function printHelp(): void {
   console.log(`gssc-langgraph software development bot
 
-Run the agentic software_dev LangGraph (model-free): implementation plan +
-software closeout checks inspired by gssc5 software agent / software-closeout-review.
+Run the agentic software_dev LangGraph (model-free plan + checks; optional LLM
+synthesis when XAI_API_KEY is set). Inspired by gssc5 software agent /
+software-closeout-review.
 
 Usage:
   bun run software [options] [paths...]
@@ -154,6 +155,11 @@ async function runSoftware(input: {
   steps: string[];
   plan: PlanStep[];
   specialistNotes: SpecialistNote[];
+  narrativeSummary: string;
+  proposedMemoryUpdates: unknown[];
+  synthesisNote: string;
+  gssc5Root: string;
+  gssc5Note: string;
 }> {
   const files: Record<string, string> = {};
   const fileStatuses: Record<
@@ -190,6 +196,11 @@ async function runSoftware(input: {
     steps: result.steps ?? [],
     plan: result.plan ?? [],
     specialistNotes: result.specialistNotes ?? [],
+    narrativeSummary: result.narrativeSummary || result.summary || verdict,
+    proposedMemoryUpdates: result.proposedMemoryUpdates ?? [],
+    synthesisNote: result.synthesisNote || "",
+    gssc5Root: result.gssc5Root || "",
+    gssc5Note: result.gssc5Context?.note || "",
   };
 }
 
@@ -254,6 +265,9 @@ async function main(): Promise<void> {
         {
           verdict: report.verdict,
           summary: report.summary,
+          narrativeSummary: report.narrativeSummary,
+          proposedMemoryUpdates: report.proposedMemoryUpdates,
+          synthesisNote: report.synthesisNote,
           goal: args.goal,
           label: cs?.label ?? "plan-only",
           plan: report.plan,
@@ -261,6 +275,8 @@ async function main(): Promise<void> {
           findings: report.findings,
           specialistNotes: report.specialistNotes,
           steps: report.steps,
+          gssc5Root: report.gssc5Root,
+          gssc5Note: report.gssc5Note,
         },
         null,
         2,
@@ -270,6 +286,9 @@ async function main(): Promise<void> {
     console.log(`software_dev — ${cs?.label ?? "plan-only"}`);
     if (args.goal) console.log(`goal: ${args.goal}`);
     console.log(report.summary);
+    if (report.synthesisNote) {
+      console.log(`synthesis: ${report.synthesisNote}`);
+    }
     console.log("plan:");
     console.log(formatPlan(report.plan));
     console.log(`checks: ${report.checksRun.join(", ") || "(none)"}`);
