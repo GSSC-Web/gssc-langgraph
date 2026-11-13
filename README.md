@@ -9,7 +9,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 | Runtime | **TypeScript + Bun** (`packageManager: bun`), LangGraph.js — not Python |
 | Serving | Official **Agent Server** via `@langchain/langgraph-cli` (`bun run dev`) — no custom HTTP framework |
 | LLM (domain graphs) | **xAI / Grok** via `@langchain/xai` `ChatXAI` (`createChatModel()` in `src/llm`) — default model `grok-4.7` |
-| Auth (local) | **None** for local CLI serve (loopback). Production: LangSmith / custom `langgraph.json` `auth` later |
+| Auth | **API key / Bearer** via `src/auth` + `langgraph.json` `auth` (`GSSC_LANGGRAPH_API_KEY`). Empty key = local bypass; set key to reject unauthenticated requests |
 | CORS | Prefer **gssc5 backend → this service** (server-side). Browser CORS not required for that pattern |
 | Default URL | `http://127.0.0.1:2024` (`langgraph-cli dev` default) |
 | gssc5 port | gssc5 backend defaults to `PORT=3000` — keep this service on **2024** to avoid collisions |
@@ -18,12 +18,13 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 
 ```text
 .
-├── langgraph.json              # Agent Server config (graphs + env)
+├── langgraph.json              # Agent Server config (graphs + env + auth)
 ├── mise.toml                   # mise-en-place: Bun pin + task aliases
 ├── package.json                # Bun package manager
 ├── tsconfig.json
 ├── .env.example
 ├── Dockerfile                  # code package only; prefer langgraph-cli build for server images
+├── src/auth/                   # Agent Server API-key / Bearer auth handler
 ├── src/llm/                    # xAI / Grok defaults (`createChatModel`)
 ├── src/checkpoint/             # MemorySaver + compileWithMemory / threadConfig
 ├── src/gssc5/                  # load/select gssc5 `.agents` skills + memories
@@ -405,6 +406,47 @@ bunx @langchain/langgraph-cli build -t gssc-langgraph:local
 
 The root `Dockerfile` only packages graph code with Bun; day-to-day local work should use `bun run dev`.
 
+## Agent Server auth
+
+Custom auth is registered in `langgraph.json` → `auth.path` = `./src/auth/index.ts:auth`.
+
+| Mode | When | Behaviour |
+| --- | --- | --- |
+| Local bypass | `GSSC_LANGGRAPH_API_KEY` empty, or `GSSC_LANGGRAPH_AUTH_BYPASS=true` | Requests allowed (loopback `bun run dev`) |
+| Enforced | `GSSC_LANGGRAPH_API_KEY` set (comma-separated for rotation) | Missing/wrong credentials → **401**; valid Bearer / `x-api-key` → proceed |
+| Process probe | `GET /ok` | Always allowed without a key (liveness) |
+
+```bash
+# Rejected when a key is configured (no Authorization):
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:2024/runs/stream \
+  -H 'Content-Type: application/json' \
+  -d '{ "assistant_id": "health", "input": {} }'
+# → 401
+
+# Accepted:
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H "Authorization: Bearer $GSSC_LANGGRAPH_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{ "assistant_id": "health", "input": {} }'
+```
+
+SDK clients should pass the same header:
+
+```ts
+import { Client } from "@langchain/langgraph-sdk";
+
+const client = new Client({
+  apiUrl: process.env.GSSC_LANGGRAPH_BASE_URL ?? "http://127.0.0.1:2024",
+  defaultHeaders: {
+    Authorization: `Bearer ${process.env.GSSC_LANGGRAPH_API_KEY}`,
+  },
+});
+```
+
+**Cloudflare Access:** Edge Access (SSO or `CF-Access-Client-Id` / `CF-Access-Client-Secret` service tokens) may sit in front of a deployed Agent Server. That is **edge** identity and does **not** replace this app-level API key — gssc5 (and other service clients) should still send `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` to the Agent Server when the key is configured.
+
+Official: [Custom auth (JS)](https://docs.langchain.com/langsmith/auth) · [langgraph.json `auth`](https://docs.langchain.com/langsmith/cli).
+
 ## How gssc5 should call this service
 
 **Base URL env (suggested for gssc5):**
@@ -472,8 +514,8 @@ curl -s http://127.0.0.1:2024/ok
 | Stateful | `POST /threads` then `threads/{id}/runs/stream` (or SDK `runs.stream(thread_id, …)`); graphs compiled with `compileWithMemory` load prior checkpoints |
 | Input shape | Per-graph; health accepts `{}`; `conversation` expects `{ "message": string }`; specialists accept their usual inputs and append `reviewMemory` / `specialistNotes` when threaded |
 | Checkpointer (local) | In-process `MemorySaver` on `conversation`, `closeout_review`, `software_dev`, `test_development` (and future conversational / LLM graphs via `compileWithMemory`) |
-| Auth (local) | None |
-| Auth (prod) | TBD — LangSmith API key and/or custom auth handler |
+| Auth (local) | Bypass when `GSSC_LANGGRAPH_API_KEY` is empty (or `GSSC_LANGGRAPH_AUTH_BYPASS=true`) |
+| Auth (enforced) | `Authorization: Bearer $GSSC_LANGGRAPH_API_KEY` (or `x-api-key`); see [Agent Server auth](#agent-server-auth) |
 
 Official references:
 
