@@ -30,9 +30,11 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
 │   ├── conversation/graph.ts        # assistant id: conversation (MemorySaver)
+│   ├── closeout_review/graph.ts     # assistant id: closeout_review
 │   ├── test_development/graph.ts    # assistant id: test_development
 │   └── software_dev/graph.ts        # assistant id: software_dev
 ├── src/review/                 # shared change-set collectors for tooling CLIs
+├── src/closeout/               # closeout_review criteria, checks, CLI
 ├── src/test_dev/               # test-development contracts, analyzers, CLI
 ├── src/software/               # software_dev plan + closeout criteria, CLI
 └── tests/
@@ -59,7 +61,7 @@ const llm = createChatModel({ temperature: 0 });
 | API key env | `XAI_API_KEY` |
 | Model override env | `GSSC_XAI_MODEL` (preferred) or `XAI_MODEL` |
 
-The smoke assistant (`health`) remains **model-free** so `bun run dev` / CI work without provider keys.
+Smoke/tooling assistants (`health`, `conversation`, `closeout_review`, `software_dev`, `test_development`) remain **model-free** so `bun run dev` / CI work without provider keys.
 
 ### Breaking / migration notes
 
@@ -133,6 +135,62 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
   }'
 ```
 
+## Closeout review workflow
+
+Runnable agentic **closeout reviewer** (LangGraph graph + CLI). Behavioral reference: gssc5 peer closeout skills — [requirements-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/requirements-closeout-review/SKILL.md), [software-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/software-closeout-review/SKILL.md), [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (scope → peer lanes → PASS/FAIL with proposed fixes; no silent contract rewrites) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
+
+This is a **new** assistant (`closeout_review` / `src/closeout/`), not a revival of `service_review`. Peers: `software_dev` (plan + SW closeout) and `test_development` (test plan/closeout). Baseline contract required here is **`health` only**.
+
+### What it checks
+
+| Check | gssc5 peer | Focus |
+| --- | --- | --- |
+| `scope` | all | Reviewable change set / workspace present |
+| `contracts` | requirements | Baseline `health` stays registered; no silent README/contract drops |
+| `software_trace` | software | `langgraph.json` ↔ `src/graphs/<id>/graph.ts` (+ README for new ids) |
+| `software_match` | software | Real StateGraph + `export const graph` / `compileWithMemory` (not a hollow stub) |
+| `software_quality` | software | Fail-fast, size, `graph.name`, model-free smoke/tooling |
+| `third_party` | software | LangGraph.js / Bun / langgraph-cli over reinvented HTTP or Python |
+| `test_coverage` | test | Changed / workspace graphs have bun:test coverage |
+| `test_target` | test | Intentional expects; no deleting covering tests to “fix” SW |
+| `secrets` | ops | No committed secrets / real-looking keys |
+
+**Output:** `verdict: PASS|FAIL`, `summary`, and `findings[]` with `check`, `severity`, `path`, `uid?`, `message`, `fix`.
+
+### Trigger locally
+
+```bash
+bun run closeout                 # git range vs origin/master (+ dirty), else workspace
+bun run closeout --base master
+bun run closeout --workspace     # full structural closeout
+bun run closeout --diff pr.patch
+bun run closeout --json          # machine-readable report
+# or: mise run closeout
+```
+
+Exit `0` on PASS, `1` on FAIL.
+
+### Trigger via Agent Server
+
+With `bun run dev`, call assistant `closeout_review`:
+
+```bash
+curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "assistant_id": "closeout_review",
+    "input": {
+      "label": "api",
+      "files": {
+        "langgraph.json": "{\"graphs\":{\"health\":\"./src/graphs/health/graph.ts:graph\"}}",
+        "src/graphs/orphan/graph.ts": "export const graph = {}"
+      }
+    }
+  }'
+```
+
+Prefer `bun run closeout` for git-aware PR/diff collection; the assistant accepts a pre-built `files` map and optional `diff` string.
+
 ## Test development workflow
 
 Runnable agentic test-development bot (LangGraph graph + CLI). Behavioral reference: [gssc5 test agent](https://github.com/GSSC-Web/gssc5/blob/master/.agents/agents/test/agent.md) and [test-closeout-review](https://github.com/GSSC-Web/gssc5/blob/master/.agents/skills/test-closeout-review/SKILL.md) (one permanent test per in-scope requirement, assert the contract not incidental SW, focused harness, PASS/FAIL + plan) — implemented here as a **model-free** Bun/TypeScript workflow, not a Dot Agents `.agents/` scaffold.
@@ -182,9 +240,9 @@ curl -s -N -X POST http://127.0.0.1:2024/runs/stream \
   }'
 ```
 
-Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string.
+Prefer `bun run test-dev` for git-aware collection; the assistant accepts a pre-built `files` map and optional `diff` string (same shape as `closeout_review`).
 
-Sibling **software development** bot lives under `software_dev` / `src/software/` (separate ownership); this workflow does not implement software closeout.
+Sibling **software development** bot lives under `software_dev` / `src/software/` (separate ownership); this workflow does not implement software closeout. Pre-merge **closeout review** is `closeout_review` / `src/closeout/`.
 
 ## gssc5 skills / memories context
 
@@ -207,8 +265,9 @@ See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md).
 
 | Assistant id | Purpose | Checkpointer |
 | --- | --- | --- |
-| `health` | Smoke / liveness payload via the same runs API | none (one-shot) |
+| `health` | Smoke / liveness payload via the same runs API (baseline contract) | none (one-shot) |
 | `conversation` | Model-free multi-turn echo demo (thread persistence) | **MemorySaver** |
+| `closeout_review` | Model-free closeout review (gssc5 peer closeout skills) | none (one-shot) |
 | `test_development` | Model-free test-development workflow (contracts → plan / closeout) | none (one-shot) |
 | `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | none (one-shot) |
 
@@ -274,7 +333,7 @@ Pass the same `THREAD_ID` on later runs to continue the conversation. Omit the t
 
 ## Run locally (Bun)
 
-Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
+Requires [Bun](https://bun.sh) (≥ 1.1 recommended). With [mise](https://mise.jdx.dev/) installed, `mise install` pins Bun from `mise.toml`, and `mise run install|dev|test|typecheck|closeout|test-dev|software` wraps the same scripts as below (same style as [gssc5](https://github.com/GSSC-Web/gssc5)).
 
 ```bash
 bun install          # or: mise run install
