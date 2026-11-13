@@ -17,6 +17,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 
 ```text
 .
+├── .agents/                    # Dot Agents Protocol (reviewer + skills; see Agents)
 ├── langgraph.json              # Agent Server config (graphs + env)
 ├── package.json                # Bun package manager
 ├── tsconfig.json
@@ -29,6 +30,18 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ```
 
 Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`.
+
+## Agents
+
+Agent config follows the same [Dot Agents Protocol](https://dotagentsprotocol.com) layout as [gssc5 `.agents`](https://github.com/GSSC-Web/gssc5/tree/master/.agents) (`agents.md`, profiles, `SKILL.md` skills, memories).
+
+| Path | Role |
+| --- | --- |
+| [`.agents/agents.md`](.agents/agents.md) | Project source of truth / how to invoke |
+| [`.agents/agents/reviewer/agent.md`](.agents/agents/reviewer/agent.md) | Dedicated LangGraph service reviewer |
+| [`.agents/skills/langgraph-service-review/SKILL.md`](.agents/skills/langgraph-service-review/SKILL.md) | Closeout review checklist (graphs, registry, gssc5 contracts) |
+
+**Invoke:** ask Cursor (or another Dot Agents host) to load the **reviewer** profile or run **`langgraph-service-review`** against a PR/diff. Expect PASS/FAIL with path-level fixes.
 
 ## Registered graphs
 
