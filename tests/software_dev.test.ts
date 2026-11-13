@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { threadConfig } from "../src/checkpoint/index.js";
 import { graph as softwareGraph } from "../src/graphs/software_dev/graph.js";
 import {
   checkDiscipline,
@@ -13,7 +14,7 @@ import { collectWorkspace } from "../src/review/collect.js";
 import type { ChangeSet } from "../src/software/types.js";
 
 describe("software_dev graph", () => {
-  test("is compiled", () => {
+  test("is compiled with MemorySaver", () => {
     expect(softwareGraph).toBeDefined();
     expect(softwareGraph.name).toBe("GSSC Software Dev");
   });
@@ -30,30 +31,54 @@ describe("software_dev graph", () => {
         status: f.status,
       })),
     };
-    const result = await softwareGraph.invoke({
-      goal: "Close out current gssc-langgraph software",
-      label: cs.label,
-      changeSet: cs,
-      files: Object.fromEntries(
-        cs.files
-          .filter((f) => f.content !== undefined)
-          .map((f) => [f.path, f.content!]),
-      ),
-    });
+    const result = await softwareGraph.invoke(
+      {
+        goal: "Close out current gssc-langgraph software",
+        label: cs.label,
+        changeSet: cs,
+        files: Object.fromEntries(
+          cs.files
+            .filter((f) => f.content !== undefined)
+            .map((f) => [f.path, f.content!]),
+        ),
+      },
+      threadConfig(`software-workspace-${crypto.randomUUID()}`),
+    );
     expect(result.verdict).toBe("PASS");
     expect(result.plan.length).toBeGreaterThan(0);
     expect(result.checksRun).toContain("scope");
     expect(result.checksRun).toContain("discipline");
     expect(result.steps).toContain("verdict");
+    expect(result.specialistNotes.length).toBe(1);
+    expect(result.specialistNotes[0]?.verdict).toBe("PASS");
   });
 
   test("plans from goal alone (plan-only)", async () => {
-    const result = await softwareGraph.invoke({
-      goal: "Add a new domain graph for membership lookups",
-    });
+    const result = await softwareGraph.invoke(
+      {
+        goal: "Add a new domain graph for membership lookups",
+      },
+      threadConfig(`software-plan-${crypto.randomUUID()}`),
+    );
     expect(result.verdict).toBe("PASS");
     expect(result.plan.some((s) => s.id === "scaffold_graph")).toBe(true);
     expect(result.plan.some((s) => s.id === "closeout")).toBe(true);
+    expect(result.specialistNotes.length).toBe(1);
+  });
+
+  test("appends specialistNotes across thread turns", async () => {
+    const config = threadConfig(`software-mem-${crypto.randomUUID()}`);
+    const first = await softwareGraph.invoke(
+      { goal: "First planning pass" },
+      config,
+    );
+    expect(first.specialistNotes.length).toBe(1);
+    const second = await softwareGraph.invoke(
+      { goal: "Second planning pass" },
+      config,
+    );
+    expect(second.specialistNotes.length).toBe(2);
+    expect(second.specialistNotes[1]?.goal).toContain("Second");
   });
 
   test("FAILs when new graph is unregistered", () => {

@@ -13,6 +13,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { threadConfig } from "../checkpoint/index.js";
 import { graph } from "../graphs/software_dev/graph.js";
 import {
   collectFromDiff,
@@ -25,6 +26,7 @@ import type {
   PlanStep,
   SoftwareFinding,
   SoftwareVerdict,
+  SpecialistNote,
 } from "./types.js";
 
 type Args = {
@@ -151,6 +153,7 @@ async function runSoftware(input: {
   checksRun: string[];
   steps: string[];
   plan: PlanStep[];
+  specialistNotes: SpecialistNote[];
 }> {
   const files: Record<string, string> = {};
   const fileStatuses: Record<
@@ -164,15 +167,19 @@ async function runSoftware(input: {
     }
   }
 
-  const result = await graph.invoke({
-    goal: input.goal,
-    requirements: input.requirements,
-    diff: input.cs?.diff ?? "",
-    files,
-    fileStatuses,
-    label: input.cs?.label ?? "",
-    changeSet: input.cs,
-  });
+  // One-shot CLI: fresh thread_id. Reuse a stable id for multi-turn memory.
+  const result = await graph.invoke(
+    {
+      goal: input.goal,
+      requirements: input.requirements,
+      diff: input.cs?.diff ?? "",
+      files,
+      fileStatuses,
+      label: input.cs?.label ?? "",
+      changeSet: input.cs,
+    },
+    threadConfig(`software-cli-${crypto.randomUUID()}`),
+  );
 
   const verdict = (result.verdict || "FAIL") as SoftwareVerdict;
   return {
@@ -182,6 +189,7 @@ async function runSoftware(input: {
     checksRun: result.checksRun ?? [],
     steps: result.steps ?? [],
     plan: result.plan ?? [],
+    specialistNotes: result.specialistNotes ?? [],
   };
 }
 
@@ -251,6 +259,7 @@ async function main(): Promise<void> {
           plan: report.plan,
           checksRun: report.checksRun,
           findings: report.findings,
+          specialistNotes: report.specialistNotes,
           steps: report.steps,
         },
         null,

@@ -13,6 +13,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { threadConfig } from "../checkpoint/index.js";
 import { graph } from "../graphs/closeout_review/graph.js";
 import {
   collectFromDiff,
@@ -24,6 +25,7 @@ import type {
   ChangeSet,
   CloseoutFinding,
   CloseoutVerdict,
+  ReviewMemoryNote,
 } from "./types.js";
 
 type Args = {
@@ -133,6 +135,7 @@ async function runCloseout(cs: ChangeSet): Promise<{
   synthesisNote: string;
   gssc5Root: string;
   gssc5Note: string;
+  reviewMemory: ReviewMemoryNote[];
 }> {
   const files: Record<string, string> = {};
   const fileStatuses: Record<
@@ -144,13 +147,17 @@ async function runCloseout(cs: ChangeSet): Promise<{
     fileStatuses[f.path] = f.status;
   }
 
-  const result = await graph.invoke({
-    diff: cs.diff ?? "",
-    files,
-    fileStatuses,
-    label: cs.label,
-    changeSet: cs,
-  });
+  // One-shot CLI: fresh thread_id. Reuse a stable id for multi-turn memory.
+  const result = await graph.invoke(
+    {
+      diff: cs.diff ?? "",
+      files,
+      fileStatuses,
+      label: cs.label,
+      changeSet: cs,
+    },
+    threadConfig(`closeout-cli-${crypto.randomUUID()}`),
+  );
 
   const verdict = (result.verdict || "FAIL") as CloseoutVerdict;
   return {
@@ -164,6 +171,7 @@ async function runCloseout(cs: ChangeSet): Promise<{
     synthesisNote: result.synthesisNote || "",
     gssc5Root: result.gssc5Root || "",
     gssc5Note: result.gssc5Context?.note || "",
+    reviewMemory: result.reviewMemory ?? [],
   };
 }
 
@@ -217,6 +225,7 @@ async function main(): Promise<void> {
           label: cs.label,
           checksRun: report.checksRun,
           findings: report.findings,
+          reviewMemory: report.reviewMemory,
           steps: report.steps,
           gssc5Root: report.gssc5Root,
           gssc5Note: report.gssc5Note,

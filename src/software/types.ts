@@ -50,3 +50,12 @@ export type SoftwareReport = {
   findings: SoftwareFinding[];
   checksRun: SoftwareCheckId[];
 };
+
+/** Durable per-thread note appended by finalize when using MemorySaver. */
+export type SpecialistNote = {
+  at: string;
+  verdict: SoftwareVerdict;
+  summary: string;
+  label?: string;
+  goal?: string;
+};

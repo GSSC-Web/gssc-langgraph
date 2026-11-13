@@ -7,7 +7,9 @@
  * domain graphs; keep smoke assistants model-free.
  *
  * Thread persistence helpers live under `./checkpoint` — conversational /
- * LLM graphs should `compileWithMemory` and pass `configurable.thread_id`.
+ * LLM graphs and specialist bots (`closeout_review`, `software_dev`,
+ * `test_development`) should `compileWithMemory` and pass
+ * `configurable.thread_id` for durable notes across turns.
  *
  * gssc5 Dot Agents skills/memories loaders live under `./gssc5`.
  */

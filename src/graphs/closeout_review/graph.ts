@@ -8,6 +8,8 @@
  * — not a Dot Agents `.agents/` scaffold, and not a revival of `service_review`.
  *
  * Invoke via Agent Server assistant id `closeout_review`, or `bun run closeout`.
+ * Compiled with MemorySaver (`compileWithMemory`): pass `configurable.thread_id`
+ * so `reviewMemory` accumulates across runs on the same thread.
  *
  * Ownership: `closeout_review` / `src/closeout/` only. Peers:
  * `software_dev` (plan + SW closeout), `test_development` (test plan/closeout).
@@ -17,6 +19,7 @@
  * skips cleanly when `XAI_API_KEY` is absent.
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
+import { compileWithMemory } from "../../checkpoint/index.js";
 import {
   ARCH_MEMORY_IDS,
   CLOSEOUT_PEER_SKILL_IDS,
@@ -37,6 +40,7 @@ import type {
   CloseoutFinding,
   CloseoutVerdict,
   ProposedMemoryUpdate,
+  ReviewMemoryNote,
 } from "../../closeout/types.js";
 
 const FindingAnnotation = Annotation<CloseoutFinding[]>({
@@ -56,6 +60,11 @@ const UidsAnnotation = Annotation<string[]>({
 
 const ProposedMemoryAnnotation = Annotation<ProposedMemoryUpdate[]>({
   reducer: (_left, right) => right ?? [],
+  default: () => [],
+});
+
+const ReviewMemoryAnnotation = Annotation<ReviewMemoryNote[]>({
+  reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
   default: () => [],
 });
 
@@ -96,6 +105,8 @@ const CloseoutState = Annotation.Root({
   narrativeSummary: Annotation<string>(),
   proposedMemoryUpdates: ProposedMemoryAnnotation,
   synthesisNote: Annotation<string>(),
+  /** Durable review notes across thread turns (append-only). */
+  reviewMemory: ReviewMemoryAnnotation,
   steps: StepsAnnotation,
 });
 
@@ -202,9 +213,17 @@ const finalize = async (
 ): Promise<typeof CloseoutState.Update> => {
   const findings = state.findings ?? [];
   const verdict = verdictFrom(findings);
+  const summary = summarize(verdict, findings);
+  const note: ReviewMemoryNote = {
+    at: new Date().toISOString(),
+    verdict,
+    summary,
+    label: state.changeSet?.label ?? state.label,
+  };
   return {
     verdict,
-    summary: summarize(verdict, findings),
+    summary,
+    reviewMemory: [note],
     steps: ["verdict"],
   };
 };
@@ -259,5 +278,6 @@ const builder = new StateGraph(CloseoutState)
   .addEdge("check_secrets", "finalize")
   .addEdge("finalize", "synthesize");
 
-export const graph = builder.compile();
-graph.name = "GSSC Closeout Review";
+export const graph = compileWithMemory(builder, {
+  name: "GSSC Closeout Review",
+});

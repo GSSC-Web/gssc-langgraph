@@ -9,8 +9,11 @@
  * Dot Agents `.agents/` scaffold.
  *
  * Invoke via assistant id `test_development`, or `bun run test-dev`.
+ * Compiled with MemorySaver (`compileWithMemory`): pass `configurable.thread_id`
+ * so `specialistNotes` accumulate across runs on the same thread.
  */
 import { Annotation, StateGraph } from "@langchain/langgraph";
+import { compileWithMemory } from "../../checkpoint/index.js";
 import {
   formatGssc5Context,
   loadGssc5ContextForRole,
@@ -28,6 +31,7 @@ import type {
   CoverageLink,
   Finding,
   PlanItem,
+  SpecialistNote,
   TestDevCheckId,
   TestDevVerdict,
 } from "../../test_dev/types.js";
@@ -38,6 +42,11 @@ const FindingAnnotation = Annotation<Finding[]>({
 });
 
 const StepsAnnotation = Annotation<string[]>({
+  reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
+  default: () => [],
+});
+
+const SpecialistNotesAnnotation = Annotation<SpecialistNote[]>({
   reducer: (left, right) => [...(left ?? []), ...(right ?? [])],
   default: () => [],
 });
@@ -88,6 +97,8 @@ const TestDevState = Annotation.Root({
   }),
   gssc5ContextText: Annotation<string>(),
   gssc5Root: Annotation<string>(),
+  /** Durable specialist notes across thread turns (append-only). */
+  specialistNotes: SpecialistNotesAnnotation,
   steps: StepsAnnotation,
 });
 
@@ -185,9 +196,17 @@ const finalize = async (
   const findings = state.findings ?? [];
   const plan = state.plan ?? [];
   const verdict = verdictFrom(findings);
+  const summary = summarize(verdict, findings, plan);
+  const note: SpecialistNote = {
+    at: new Date().toISOString(),
+    verdict,
+    summary,
+    label: state.changeSet?.label ?? state.label,
+  };
   return {
     verdict,
-    summary: summarize(verdict, findings, plan),
+    summary,
+    specialistNotes: [note],
     steps: ["verdict"],
   };
 };
@@ -202,5 +221,6 @@ const builder = new StateGraph(TestDevState)
   .addEdge("load_gssc5_context", "analyze")
   .addEdge("analyze", "finalize");
 
-export const graph = builder.compile();
-graph.name = "GSSC Test Development";
+export const graph = compileWithMemory(builder, {
+  name: "GSSC Test Development",
+});

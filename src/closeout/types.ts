@@ -85,3 +85,11 @@ export type CloseoutSynthesis = {
    */
   note: string;
 };
+
+/** Durable per-thread note appended by finalize when using MemorySaver. */
+export type ReviewMemoryNote = {
+  at: string;
+  verdict: CloseoutVerdict;
+  summary: string;
+  label?: string;
+};

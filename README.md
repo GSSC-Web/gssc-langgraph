@@ -30,9 +30,9 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 ├── src/graphs/
 │   ├── health/graph.ts              # assistant id: health
 │   ├── conversation/graph.ts        # assistant id: conversation (MemorySaver)
-│   ├── closeout_review/graph.ts     # assistant id: closeout_review
-│   ├── test_development/graph.ts    # assistant id: test_development
-│   └── software_dev/graph.ts        # assistant id: software_dev
+│   ├── closeout_review/graph.ts     # assistant id: closeout_review (MemorySaver)
+│   ├── test_development/graph.ts    # assistant id: test_development (MemorySaver)
+│   └── software_dev/graph.ts        # assistant id: software_dev (MemorySaver)
 ├── src/review/                 # shared change-set collectors for tooling CLIs
 ├── src/closeout/               # closeout_review criteria, checks, CLI
 ├── src/test_dev/               # test-development contracts, analyzers, CLI
@@ -40,7 +40,7 @@ Standalone [LangGraph.js](https://docs.langchain.com/oss/javascript/langgraph/ov
 └── tests/
 ```
 
-Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`. Prefer `createChatModel()` from `src/llm` when a graph needs an LLM (xAI by default). Conversational / LLM graphs should `compileWithMemory` from `src/checkpoint` so clients can continue via `thread_id`.
+Add future GSSC domain graphs as new folders under `src/graphs/<domain>/` and register them in `langgraph.json`. Prefer `createChatModel()` from `src/llm` when a graph needs an LLM (xAI by default). Conversational / LLM graphs and specialist tooling bots (`closeout_review`, `software_dev`, `test_development`) should `compileWithMemory` from `src/checkpoint` so clients can continue via `thread_id` and accumulate durable notes.
 
 ## LLM provider (xAI)
 
@@ -278,15 +278,15 @@ See [docs/gssc5-skills-memories.md](docs/gssc5-skills-memories.md) and [docs/clo
 | --- | --- | --- |
 | `health` | Smoke / liveness payload via the same runs API (baseline contract) | none (one-shot) |
 | `conversation` | Model-free multi-turn echo demo (thread persistence) | **MemorySaver** |
-| `closeout_review` | Closeout review (gssc5 reviewer context + optional LLM synthesis) | none (one-shot) |
-| `test_development` | Model-free test-development workflow (contracts → plan / closeout) | none (one-shot) |
-| `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | none (one-shot) |
+| `closeout_review` | Closeout review (gssc5 reviewer context + optional LLM synthesis) | **MemorySaver** (`reviewMemory`) |
+| `test_development` | Model-free test-development workflow (contracts → plan / closeout) | **MemorySaver** (`specialistNotes`) |
+| `software_dev` | Model-free software plan + closeout (gssc5 software-agent spirit) | **MemorySaver** (`specialistNotes`) |
 
 The Agent Server also exposes HTTP `GET /ok` for process health.
 
 ## Threads + MemorySaver (short-term memory)
 
-Conversational assistants persist graph state **per thread** when compiled with a checkpointer. This service uses LangGraph’s in-process [`MemorySaver`](https://docs.langchain.com/oss/javascript/langgraph/add-memory) for local/dev:
+Assistants compiled with a checkpointer persist graph state **per thread**. This service uses LangGraph’s in-process [`MemorySaver`](https://docs.langchain.com/oss/javascript/langgraph/add-memory) for local/dev:
 
 ```ts
 import { compileWithMemory, threadConfig } from "./checkpoint/index.js";
@@ -294,15 +294,25 @@ import { compileWithMemory, threadConfig } from "./checkpoint/index.js";
 
 export const graph = compileWithMemory(builder, { name: "My Agent" });
 
-// Direct invoke (unit tests / scripts):
+// Direct invoke (unit tests / scripts) — thread_id required when checkpointer is on:
 await graph.invoke({ message: "hi" }, threadConfig("conversation-1"));
 await graph.invoke({ message: "again" }, threadConfig("conversation-1"));
 ```
 
+Domain specialist graphs (`closeout_review`, `software_dev`, `test_development`) also use `compileWithMemory`. Reuse the same `thread_id` so finalize can append durable notes:
+
+| Graph | Durable field | Appended by |
+| --- | --- | --- |
+| `closeout_review` | `reviewMemory` | `finalize` (verdict + summary + label) |
+| `software_dev` | `specialistNotes` | `finalize` (verdict + summary + goal/label) |
+| `test_development` | `specialistNotes` | `finalize` (verdict + summary + label) |
+
+CLI one-shots (`bun run closeout` / `software` / `test-dev`) mint a fresh `thread_id` per process. For multi-turn specialist memory over Agent Server / SDK, create a thread and reuse it.
+
 | Concern | Detail |
 | --- | --- |
-| Which graphs | `conversation` today; new conversational / LLM graphs should opt in via `compileWithMemory` |
-| One-shot bots | `health`, closeout-style workflows stay on `builder.compile()` (no durable turn memory) |
+| Which graphs | `conversation` plus specialists `closeout_review`, `software_dev`, `test_development` via `compileWithMemory`; new conversational / LLM graphs should opt in the same way |
+| One-shot bots | `health` stays on `builder.compile()` (no checkpointer / no `thread_id` required) |
 | Persistence scope | **In-process** — lost on Agent Server restart. Fine for local `bun run dev` |
 | Production follow-up | Swap to a durable saver (e.g. Postgres / SQLite checkpointer) when multi-replica or restart-safe memory is required — not blocking this setup |
 | Agent Server threads | Create a thread, then stream runs with that `thread_id` (SDK or REST below) |
@@ -324,6 +334,16 @@ await client.runs.wait(thread.thread_id, "conversation", {
 await client.runs.wait(thread.thread_id, "conversation", {
   input: { message: "follow-up" },
 });
+
+// Specialists: reuse a thread so finalize appends durable notes
+const closeoutThread = await client.threads.create();
+await client.runs.wait(closeoutThread.thread_id, "closeout_review", {
+  input: { label: "files", files: { /* … */ } },
+});
+// Second run on the same thread → reviewMemory length grows
+await client.runs.wait(closeoutThread.thread_id, "closeout_review", {
+  input: { label: "files", files: { /* … */ } },
+});
 ```
 
 ### Invoke with a thread (Agent Server REST)
@@ -340,7 +360,7 @@ curl -s -N -X POST "http://127.0.0.1:2024/threads/${THREAD_ID}/runs/stream" \
   }'
 ```
 
-Pass the same `THREAD_ID` on later runs to continue the conversation. Omit the thread (threadless `POST /runs/stream`) for one-shot invokes such as `health`.
+Pass the same `THREAD_ID` on later runs to continue the conversation or to grow specialist `reviewMemory` / `specialistNotes`. Omit the thread (threadless `POST /runs/stream`) only for graphs without a checkpointer such as `health` — MemorySaver graphs require a `thread_id`.
 
 ## Run locally (Bun)
 
@@ -450,8 +470,8 @@ curl -s http://127.0.0.1:2024/ok
 | Assistant selection | `assistant_id` = graph key from `langgraph.json` (`health`, `conversation`, …) |
 | Stateless | `POST /runs/stream` with `thread_id` omitted / SDK `null` |
 | Stateful | `POST /threads` then `threads/{id}/runs/stream` (or SDK `runs.stream(thread_id, …)`); graphs compiled with `compileWithMemory` load prior checkpoints |
-| Input shape | Per-graph; health accepts `{}`; `conversation` expects `{ "message": string }` |
-| Checkpointer (local) | In-process `MemorySaver` on `conversation` (and future conversational graphs via `compileWithMemory`) |
+| Input shape | Per-graph; health accepts `{}`; `conversation` expects `{ "message": string }`; specialists accept their usual inputs and append `reviewMemory` / `specialistNotes` when threaded |
+| Checkpointer (local) | In-process `MemorySaver` on `conversation`, `closeout_review`, `software_dev`, `test_development` (and future conversational / LLM graphs via `compileWithMemory`) |
 | Auth (local) | None |
 | Auth (prod) | TBD — LangSmith API key and/or custom auth handler |
 
