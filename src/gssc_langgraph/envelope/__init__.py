@@ -16,6 +16,7 @@ from gssc_langgraph.envelope.build import (
     context_ref_from_bundle,
     normalize_findings,
 )
+from gssc_langgraph.envelope.coerce import coerce_text
 from gssc_langgraph.envelope.domains import domains_from_paths, pin_domains
 from gssc_langgraph.envelope.types import (
     ContextRef,
@@ -48,6 +49,7 @@ __all__ = [
     "build_graph_response",
     "build_next_actions",
     "change_set_content_oversized",
+    "coerce_text",
     "context_ref_from_bundle",
     "domains_from_paths",
     "normalize_findings",

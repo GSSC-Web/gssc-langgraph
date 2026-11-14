@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 
 from gssc_langgraph.envelope import (
     build_graph_response,
+    coerce_text,
     context_ref_from_bundle,
     normalize_findings,
     pin_domains,
@@ -32,6 +33,7 @@ from gssc_langgraph.gssc5 import format_gssc5_context, load_gssc5_context_for_ro
 from gssc_langgraph.gssc5.types import Gssc5ContextBundle
 from gssc_langgraph.test_dev.analyze import run_analysis, summarize, verdict_from
 from gssc_langgraph.test_dev.synthesize import synthesize_test_dev
+from gssc_langgraph.work_surface import looks_like_unified_diff
 from gssc_langgraph.test_dev.types import (
     ChangeSet,
     ChangedFile,
@@ -56,6 +58,7 @@ def replace_nullable(left: Any, right: Any) -> Any:
 
 
 class TestDevState(TypedDict, total=False):
+    goal: str
     diff: str
     files: dict[str, str]
     label: str
@@ -139,8 +142,43 @@ def parse_changeset(state: TestDevState) -> dict[str, Any]:
                 ),
             }
         )
+    goal = coerce_text(state.get("goal")).strip()
+    requirements = coerce_text(state.get("requirements")).strip()
+    files = list((cs or {}).get("files") or [])
+    diff = str((cs or {}).get("diff") or "")
+    has_usable_cs = bool(files) or looks_like_unified_diff(diff)
+    if not has_usable_cs and not goal and not requirements:
+        findings.append(
+            {
+                "check": "scope",
+                "severity": "error",
+                "code": "input.goal_or_changeset_required",
+                "message": (
+                    "TestDev requires a goal/requirements and/or a usable "
+                    "changeSet (files or unified diff) — empty-scope PASS "
+                    "is not allowed (input ERROR)"
+                ),
+            }
+        )
+    elif not has_usable_cs:
+        # Goal/requirements alone still need a changeSet for coverage; ERROR
+        # (not soft PASS) so workers cannot treat empty scope as coverage ok.
+        findings.append(
+            {
+                "check": "scope",
+                "severity": "error",
+                "code": "changeset.required",
+                "message": (
+                    "TestDev requires changeSet.files or a unified "
+                    "`diff --git` (input ERROR). Optional goal/requirements "
+                    "feed DomainPin and testCases/gaps cues only."
+                ),
+            }
+        )
     return {
         "changeSet": cs,
+        "goal": goal,
+        "requirements": requirements,
         "findings": findings,
         "steps": ["parse_changeset"],
     }
@@ -157,7 +195,8 @@ def load_gssc5_context_node(
         part
         for part in [
             state.get("label") or "",
-            state.get("requirements") or "",
+            coerce_text(state.get("goal")),
+            coerce_text(state.get("requirements")),
             path_hints,
             "test closeout",
         ]
@@ -182,15 +221,24 @@ def load_gssc5_context_node(
     }
 
 
+def _goal_and_requirements(state: TestDevState) -> tuple[str, str]:
+    goal = coerce_text(state.get("goal")).strip()
+    requirements = coerce_text(state.get("requirements")).strip()
+    return goal, requirements
+
+
 def analyze_scope(state: TestDevState) -> dict[str, Any]:
     cs = state.get("changeSet") or build_change_set(state)
+    goal, requirements = _goal_and_requirements(state)
+    cue = "\n".join(part for part in [goal, requirements] if part)
     if any(
         f.get("severity") == "error"
         and str(f.get("code") or "").startswith(("changeset.", "input."))
         for f in (state.get("findings") or [])
     ):
         domains = pin_domains(
-            requirements=state.get("requirements") or "",
+            goal=goal,
+            requirements=requirements,
             change_set=cs,  # type: ignore[arg-type]
             domain_hint=state.get("domainHint"),
         )
@@ -201,9 +249,10 @@ def analyze_scope(state: TestDevState) -> dict[str, Any]:
             "gaps": [],
             "steps": ["analyze"],
         }
-    result = run_analysis(cs, requirements=state.get("requirements") or "")
+    result = run_analysis(cs, requirements=cue)
     domains = pin_domains(
-        requirements=state.get("requirements") or "",
+        goal=goal,
+        requirements=requirements,
         change_set=cs,  # type: ignore[arg-type]
         domain_hint=state.get("domainHint"),
     )
@@ -307,8 +356,10 @@ def emit_response(state: TestDevState) -> dict[str, Any]:
     for i, raw in enumerate(state.get("findings") or []):
         if raw.get("code") and i < len(findings):
             findings[i]["code"] = str(raw["code"])
+    goal, requirements = _goal_and_requirements(state)
     domains = list(state.get("domains") or []) or pin_domains(
-        requirements=state.get("requirements") or "",
+        goal=goal,
+        requirements=requirements,
         change_set=state.get("changeSet"),  # type: ignore[arg-type]
         domain_hint=state.get("domainHint"),
     )
@@ -318,6 +369,7 @@ def emit_response(state: TestDevState) -> dict[str, Any]:
         or ""
     )
     payload: dict[str, Any] = {
+        "goal": goal,
         "plan": list(state.get("plan") or []),
         "commands": list(state.get("commands") or []),
         "testCases": list(state.get("testCases") or []),
@@ -343,8 +395,10 @@ def emit_response(state: TestDevState) -> dict[str, Any]:
         "domains": domains,
         "steps": ["emit_response"],
     }
-    if not include_bodies and slim is not None:
-        out["gssc5Context"] = slim  # type: ignore[assignment]
+    if not include_bodies:
+        out["gssc5ContextText"] = ""
+        if slim is not None:
+            out["gssc5Context"] = slim  # type: ignore[assignment]
     return out
 
 

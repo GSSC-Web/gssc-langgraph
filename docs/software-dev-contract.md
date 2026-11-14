@@ -14,13 +14,18 @@ Provide a **goal** and/or a change set. Prefer combining a goal with files/diff 
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `goal` | `string` | Free-text development goal / task brief (recommended) |
-| `requirements` | `string` | Optional LLR / requirements excerpt (feeds the plan) |
+| `goal` | `string \| string[]` | Free-text development goal / task brief (recommended; lists joined) |
+| `requirements` | `string \| string[]` | Optional LLR / requirements excerpt (feeds the plan; lists joined) |
 | `files` | `Record<string, string>` | Path → file contents (primary change-set form) |
 | `fileStatuses` | `Record<string, "added"\|"modified"\|"deleted"\|"unchanged">` | Optional statuses for `files` |
 | `diff` | `string` | Optional unified diff (paths merged into the change set) |
 | `label` | `string` | Human label for the change set |
 | `changeSet` | object | Pre-built `{ label, files[], diff? }` (skips rebuild when present) |
+| `includeContextBodies` | `boolean` | Debug only — keep fat `gssc5ContextText` / skill bodies (default false) |
+| `domainHint` | `string \| string[]` | Optional DomainPin override |
+
+**v2 consumer:** read `response.verdict` / `response.payload` — ignore top-level
+`gssc5ContextText` (cleared by default).
 
 ### RunnableConfig overrides
 
@@ -68,7 +73,8 @@ CLI equivalent: `uv run software --goal "…" --workspace` or `--diff pr.patch` 
 | `steps` | `string[]` | Graph step names (`parse_input`, `load_gssc5_context`, `plan_work`, `check_*`, `verdict`, `synthesize`, …) |
 | `changeSet` | object \| null | Normalized change set (null for plan-only) |
 | `gssc5Context` | object \| null | Structured skills/memories bundle |
-| `gssc5ContextText` | `string` | Flattened markdown for prompts |
+| `gssc5ContextText` | `string` | Flattened markdown for prompts (empty unless `includeContextBodies`) |
+| `response` | object | Canonical v2 GraphResponse — **branch here** |
 | `gssc5Root` | `string` | Resolved checkout path (may be `""`) |
 | `narrativeSummary` | `string` | LLM NL summary, or deterministic `summary` when synthesis skipped |
 | `proposedMemoryUpdates` | `{ memoryId, summary, rationale? }[]` | Advisory only — never auto-applied |

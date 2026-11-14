@@ -24,6 +24,7 @@ from langgraph.graph import END, START, StateGraph
 
 from gssc_langgraph.envelope import (
     build_graph_response,
+    coerce_text,
     context_ref_from_bundle,
     normalize_findings,
     pin_domains,
@@ -140,7 +141,8 @@ def parse_input(state: SoftwareState) -> dict[str, Any]:
                 "fix": "Omit ChangedFile.content; use diff --git headers.",
             }
         )
-    goal = (state.get("goal") or "").strip()
+    goal = coerce_text(state.get("goal")).strip()
+    requirements = coerce_text(state.get("requirements")).strip()
     if not goal and not cs:
         findings.append(
             {
@@ -152,7 +154,8 @@ def parse_input(state: SoftwareState) -> dict[str, Any]:
         )
     return {
         "changeSet": cs,
-        "goal": state.get("goal") or "",
+        "goal": goal,
+        "requirements": requirements,
         "findings": findings,
         "steps": ["parse_input"],
     }
@@ -343,9 +346,12 @@ def emit_response(state: SoftwareState) -> dict[str, Any]:
         "domains": domains,
         "steps": ["emit_response"],
     }
-    # Slim default: drop full skill/memory bodies from state.
-    if not include_bodies and slim is not None:
-        out["gssc5Context"] = slim  # type: ignore[assignment]
+    # Slim default: drop fat skill/memory echoes from final MCP state.
+    # Coordinators must branch on ``response`` (schemaVersion 2).
+    if not include_bodies:
+        out["gssc5ContextText"] = ""
+        if slim is not None:
+            out["gssc5Context"] = slim  # type: ignore[assignment]
     return out
 
 

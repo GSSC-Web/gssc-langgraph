@@ -28,6 +28,17 @@ do not parse `narrativeSummary` / synthesis prose for PASS/FAIL/ERROR.
 LangGraph state also keeps legacy top-level fields (`verdict`, `summary`, …)
 and nests the canonical object at **`response`**.
 
+**Consumer rule (GLG-49):** always branch on `response.*` (especially
+`response.verdict`). Do not parse top-level narrative / `gssc5ContextText`
+for control flow. Typical MCP results omit fat context echoes unless
+`includeContextBodies: true`.
+
+## Text field coercion (GLG-48)
+
+`goal` and `requirements` accept `string` **or** `string[]` (joined with
+newlines). Empty after coerce with no usable changeSet → structured
+`ERROR` (not a 500 / `TypeError`).
+
 ## Verdict semantics (GLG-36)
 
 | Verdict | Meaning |
@@ -64,14 +75,21 @@ gssc5 app tickets to Python/`src/gssc_langgraph`.
   "paths": ["…"], "commands": ["bun test"] }
 ```
 
-## TestDev gates (GLG-40)
+## TestDev gates (GLG-40 / GLG-50)
 
 `payload.testCases[]` and `payload.gaps[]`. Blocking gaps → **FAIL** (not soft PASS).
 
-## Slim context (GLG-41)
+Optional `goal` (mirror SoftDev) feeds DomainPin and testCases/gaps cues
+together with `requirements`. Goal/requirements alone without a usable
+changeSet → **ERROR** (`changeset.required`) — empty-scope **PASS** is not
+allowed.
 
-Default responses omit skill/memory `content`/`body`. Use `contextRef` plus
-optional `includeContextBodies: true` for debug only.
+## Slim context (GLG-41 / GLG-49)
+
+Default responses omit skill/memory `content`/`body` and clear final-state
+`gssc5ContextText`. Use `contextRef` plus optional
+`includeContextBodies: true` for debug only. Target ≤~24KB typical MCP
+result without bodies.
 
 ## Size budgets (GLG-43)
 

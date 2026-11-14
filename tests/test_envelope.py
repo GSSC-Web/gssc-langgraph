@@ -10,6 +10,7 @@ from gssc_langgraph.envelope import (
     TARGET_RESPONSE_BYTES,
     apply_response_budgets,
     build_graph_response,
+    coerce_text,
     pin_domains,
 )
 from gssc_langgraph.envelope.budgets import utf8_size
@@ -248,3 +249,118 @@ def test_truncation_preserves_verdict_and_summary() -> None:
     assert utf8_size(response) <= 48 * 1024
     assert TARGET_RESPONSE_BYTES > 0
     assert callable(apply_response_budgets)
+
+
+def test_coerce_text_joins_string_lists() -> None:
+    assert coerce_text(None) == ""
+    assert coerce_text("solo") == "solo"
+    assert coerce_text(["backend only", "boundary"]) == "backend only\nboundary"
+    assert coerce_text(["a", ["b", "c"], ""]) == "a\nb\nc"
+
+
+@pytest.mark.asyncio
+async def test_softdev_accepts_requirements_list() -> None:
+    """GLG-48: MCP string[] must not TypeError."""
+    result = await software_graph.ainvoke(
+        {
+            "goal": "Plan backend accounts cookie hardening",
+            "requirements": ["backend only", "Elysia login session"],
+            "domainHint": "backend",
+        },
+        {
+            "configurable": {
+                "thread_id": f"env-sd-list-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["response"]["schemaVersion"] == "2"
+    assert result["verdict"] in ("PASS", "FAIL", "ERROR")
+    assert "backend" in result["response"]["domains"]
+    assert "backend only" in (result.get("requirements") or "")
+    assert result.get("gssc5ContextText", "") == ""
+
+
+@pytest.mark.asyncio
+async def test_testdev_accepts_requirements_list_and_goal() -> None:
+    """GLG-48/50: list coerce + optional goal; no changeSet → ERROR."""
+    result = await test_dev_graph.ainvoke(
+        {
+            "goal": "Cover BE accounts boundary negatives",
+            "requirements": ["backend only", "straddling needle boundary"],
+            "domainHint": "backend",
+        },
+        {
+            "configurable": {
+                "thread_id": f"env-td-goal-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["verdict"] == "ERROR"
+    assert result["response"]["verdict"] == "ERROR"
+    codes = [f.get("code") for f in result["response"]["findings"]]
+    assert "changeset.required" in codes or "input.goal_or_changeset_required" in codes
+    assert "backend" in result["response"]["domains"]
+    assert result["response"]["payload"].get("goal")
+    assert result.get("gssc5ContextText", "") == ""
+
+
+@pytest.mark.asyncio
+async def test_testdev_empty_invocation_is_error_not_pass() -> None:
+    """GLG-50: empty-scope soft PASS is not allowed."""
+    result = await test_dev_graph.ainvoke(
+        {},
+        {
+            "configurable": {
+                "thread_id": f"env-td-empty-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["verdict"] == "ERROR"
+    assert result["response"]["verdict"] == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_testdev_goal_feeds_boundary_cues_with_changeset() -> None:
+    """GLG-50: goal mirrors SoftDev for DomainPin + testCases/gaps cues."""
+    result = await test_dev_graph.ainvoke(
+        {
+            "goal": "UID PLLR-99: add straddling needle boundary negative for o\\nW",
+            "domainHint": "backend",
+            "changeSet": {
+                "label": "GSSC5-65",
+                "files": [
+                    {
+                        "path": "apps/backend/src/accounts.ts",
+                        "status": "modified",
+                    },
+                    {
+                        "path": "apps/backend/src/accounts.test.ts",
+                        "status": "modified",
+                        "content": (
+                            "test('accounts cookie', () => { "
+                            "expect(readCookie('sid')).toBeTruthy() })"
+                        ),
+                    },
+                ],
+            },
+        },
+        {
+            "configurable": {
+                "thread_id": f"env-td-goal-cs-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    resp = result["response"]
+    cases = resp["payload"]["testCases"]
+    gaps = resp["payload"]["gaps"]
+    assert any("boundary" in c["id"] or "Boundary" in c["title"] for c in cases)
+    assert gaps
+    assert resp["verdict"] == "FAIL"

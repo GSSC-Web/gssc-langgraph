@@ -73,6 +73,8 @@ async def test_loads_gssc5_reviewer_context_and_returns_verdict() -> None:
             "prScope": "origin/master...HEAD",
             "uids": ["health"],
             "files": MINIMAL_FILES,
+            # Opt into fat bodies — default MCP clears gssc5ContextText (GLG-49).
+            "includeContextBodies": True,
         },
         {
             "configurable": {
@@ -95,6 +97,26 @@ async def test_loads_gssc5_reviewer_context_and_returns_verdict() -> None:
     assert "## Skill: software-closeout-review" in result["gssc5ContextText"]
     assert result["synthesisNote"].startswith(("ok", "skipped:", "error:"))
     assert isinstance(result["narrativeSummary"], str)
+
+
+@pytest.mark.asyncio
+async def test_default_emit_clears_gssc5_context_text() -> None:
+    result = await closeout_graph.ainvoke(
+        {
+            "label": "slim-closeout",
+            "files": MINIMAL_FILES,
+        },
+        {
+            "configurable": {
+                "thread_id": f"closeout-slim-{uuid.uuid4()}",
+                "gssc5Root": FIXTURE_ROOT,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["response"]["schemaVersion"] == "2"
+    assert result.get("gssc5ContextText", "") == ""
+    assert result["response"].get("contextRef")
 
 
 @pytest.mark.asyncio

@@ -312,8 +312,11 @@ def emit_response(state: CloseoutState) -> dict[str, Any]:
         "domains": domains,
         "steps": ["emit_response"],
     }
-    if not include_bodies and slim is not None:
-        out["gssc5Context"] = slim  # type: ignore[assignment]
+    # Slim default: drop fat skill/memory echoes from final MCP state.
+    if not include_bodies:
+        out["gssc5ContextText"] = ""
+        if slim is not None:
+            out["gssc5Context"] = slim  # type: ignore[assignment]
     return out
 
 
