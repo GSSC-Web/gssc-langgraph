@@ -140,7 +140,23 @@ def resolve_scope(cs: ChangeSet) -> tuple[list[str], list[Finding]]:
                 graph_ids = all_ids
 
     if not graph_ids:
-        if surface == "gssc5_be" or _be_files(cs):
+        if surface == "mixed" or (_be_files(cs) and _fe_files(cs)):
+            findings.append(
+                {
+                    "check": "scope",
+                    "severity": "info",
+                    "message": (
+                        "mixed gssc5 BE+FE change set — dual-domain Bun + "
+                        "Angular tests (not winner-take-all)"
+                    ),
+                    "fix": (
+                        "Prefer existing changeSet test loci for each domain "
+                        "(`bun test` / `mise run //backend:test` and "
+                        "`bunx ng test`); do not invent missing companions."
+                    ),
+                }
+            )
+        elif surface == "gssc5_be" or (_be_files(cs) and not _fe_files(cs)):
             findings.append(
                 {
                     "check": "scope",
@@ -389,40 +405,12 @@ def check_timing(
     tests = _test_files(cs)
     surface = detect_work_surface(change_set=cs)
 
-    if (surface == "gssc5_be" or _be_files(cs)) and not scope_graph_ids:
-        be_tests = _be_test_files(cs)
-        commands.append("mise run //backend:test")
-        if be_tests:
-            for t in be_tests[:4]:
-                commands.append(f"bun test {t['path']}")
-        else:
-            for path in _be_files(cs)[:3]:
-                if path.endswith(".ts") and not path.endswith(".test.ts"):
-                    companion = path[: -len(".ts")] + ".test.ts"
-                    commands.append(f"bun test {companion}")
-        return findings, commands
-
-    if (surface == "gssc5_fe" or _fe_files(cs)) and not scope_graph_ids:
-        fe_tests = _fe_test_files(cs)
-        if fe_tests:
-            sample = fe_tests[0]["path"]
-            if "prompt-overlay" in sample:
-                commands.append(
-                    "bunx ng test --watch=false "
-                    "--include='**/prompt-overlay/**/*.test.ts'"
-                )
-            else:
-                commands.append(
-                    f"bunx ng test --watch=false --include='**/{sample.rsplit('/', 1)[-1]}'"
-                )
-            for t in fe_tests[:3]:
-                commands.append(
-                    f"bunx ng test --watch=false --include='**/{t['path'].rsplit('/', 1)[-1]}'"
-                )
-        else:
-            commands.append(
-                "bunx ng test --watch=false --include='**/prompt-overlay/**/*.test.ts'"
-            )
+    if not scope_graph_ids and (
+        surface in ("gssc5_be", "gssc5_fe", "mixed")
+        or _be_files(cs)
+        or _fe_files(cs)
+    ):
+        commands.extend(_app_test_commands(cs, surface))
         return findings, commands
 
     focused_files: set[str] = set()
@@ -478,45 +466,111 @@ def _companion_app_test(path: str) -> str | None:
     return None
 
 
-def _build_fe_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
-    plan: list[PlanItem] = []
-    fe_sources = _fe_files(cs)
-    fe_tests = {t["path"] for t in _fe_test_files(cs)}
-    fe_test_names = {p.rsplit("/", 1)[-1] for p in fe_tests}
+def _existing_domain_tests(cs: ChangeSet, *, surface: str) -> list[str]:
+    """Test paths that already appear in the change set for a domain."""
+    return [t["path"] for t in _app_test_files(cs, surface=surface)]
 
-    for path in fe_sources:
-        companion = _companion_app_test(path)
-        if not companion:
+
+def _nearest_existing_test(
+    source_path: str, existing_tests: list[str]
+) -> str | None:
+    """Map a source to an existing test locus (same dir preferred)."""
+    if not existing_tests:
+        return None
+    companion = _companion_app_test(source_path)
+    if companion and companion in existing_tests:
+        return companion
+    src_dir = source_path.rsplit("/", 1)[0] if "/" in source_path else ""
+    same_dir = [t for t in existing_tests if t.rsplit("/", 1)[0] == src_dir]
+    if same_dir:
+        return sorted(same_dir)[0]
+    return sorted(existing_tests)[0]
+
+
+def _app_test_commands(cs: ChangeSet, surface: str) -> list[str]:
+    """Build harness commands using only existing changeSet test paths."""
+    commands: list[str] = []
+    want_be = surface in ("gssc5_be", "mixed") or (
+        surface == "unknown" and _be_files(cs)
+    )
+    want_fe = surface in ("gssc5_fe", "mixed") or (
+        surface == "unknown" and _fe_files(cs)
+    )
+    if want_be and _be_files(cs):
+        be_tests = _existing_domain_tests(cs, surface="gssc5_be")
+        commands.append("mise run //backend:test")
+        for path in be_tests[:4]:
+            commands.append(f"bun test {path}")
+        # No invented companions when none exist in the change set.
+    if want_fe and _fe_files(cs):
+        fe_tests = _existing_domain_tests(cs, surface="gssc5_fe")
+        if fe_tests:
+            sample = fe_tests[0]
+            if "prompt-overlay" in sample:
+                commands.append(
+                    "bunx ng test --watch=false "
+                    "--include='**/prompt-overlay/**/*.test.ts'"
+                )
+            for t in fe_tests[:3]:
+                commands.append(
+                    "bunx ng test --watch=false "
+                    f"--include='**/{t.rsplit('/', 1)[-1]}'"
+                )
+        else:
+            # Point at touched FE modules without inventing a missing file.
+            for path in _fe_files(cs)[:2]:
+                name = path.rsplit("/", 1)[-1]
+                commands.append(
+                    f"bunx ng test --watch=false --include='**/{name}'"
+                )
+    return commands
+
+
+def _domain_plan_items(
+    cs: ChangeSet,
+    *,
+    surface: str,
+    label: str,
+) -> list[PlanItem]:
+    """Suggest updates only against existing changeSet tests (no invented paths)."""
+    plan: list[PlanItem] = []
+    sources = _be_files(cs) if surface == "gssc5_be" else _fe_files(cs)
+    existing = _existing_domain_tests(cs, surface=surface)
+    seen: set[str] = set()
+    for path in sources:
+        if APP_TEST_FILE_RE.search(path):
             continue
-        if companion in fe_tests or companion.rsplit("/", 1)[-1] in fe_test_names:
+        locus = _nearest_existing_test(path, existing)
+        if not locus or locus in seen:
             continue
+        seen.add(locus)
         plan.append(
             {
-                "action": "add_test",
-                "path": companion,
+                "action": "update_test",
+                "path": locus,
                 "description": (
-                    f"Ensure companion Angular test covers {path} "
-                    "(Lexical/class/theme asserts, not LangGraph graphs)"
-                ),
-                "suggestedTest": (
-                    "// Prefer existing *.test.ts patterns in this module.\n"
-                    "// Assert theme tokens / behavior — not graph.invoke.\n"
+                    f"Update existing {label} test `{locus}` for changes in "
+                    f"`{path}` — do not invent a new companion path"
                 ),
             }
         )
-
-    if not plan and fe_sources:
+    if not plan and sources:
         plan.append(
             {
                 "action": "update_test",
                 "description": (
-                    "Update focused FE `*.test.ts` for touched Angular/"
-                    "Tailwind files; keep theme-token asserts."
+                    f"Locate the existing {label} test locus for "
+                    f"`{sources[0]}` (UID→Test mapping); do not invent "
+                    "missing companions"
                 ),
-                "path": fe_sources[0],
+                "path": sources[0],
             }
         )
+    return plan
 
+
+def _build_fe_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
+    plan = _domain_plan_items(cs, surface="gssc5_fe", label="FE")
     for cmd in commands[:3]:
         plan.append(
             {
@@ -528,46 +582,22 @@ def _build_fe_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
 
 
 def _build_be_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
-    plan: list[PlanItem] = []
-    be_sources = _be_files(cs)
-    be_tests = {t["path"] for t in _be_test_files(cs)}
-    be_test_names = {p.rsplit("/", 1)[-1] for p in be_tests}
-
-    for path in be_sources:
-        companion = _companion_app_test(path)
-        if not companion:
-            continue
-        if companion in be_tests or companion.rsplit("/", 1)[-1] in be_test_names:
-            continue
-        plan.append(
-            {
-                "action": "add_test",
-                "path": companion,
-                "description": (
-                    f"Ensure companion Bun test covers {path} "
-                    "(Elysia/Prisma contract asserts — not FE component harness)"
-                ),
-                "suggestedTest": (
-                    "// Prefer existing Bun *.test.ts patterns in apps/backend.\n"
-                    "// Assert API/handler contracts — not graph.invoke.\n"
-                ),
-            }
-        )
-
-    if not plan and be_sources:
-        plan.append(
-            {
-                "action": "update_test",
-                "description": (
-                    "Update focused backend Bun `*.test.ts` for touched "
-                    "Elysia/Prisma modules; prefer `bun test` / "
-                    "`mise run //backend:test`."
-                ),
-                "path": be_sources[0],
-            }
-        )
-
+    plan = _domain_plan_items(cs, surface="gssc5_be", label="backend Bun")
     for cmd in commands[:3]:
+        plan.append(
+            {
+                "action": "run_focused",
+                "description": f"Prefer focused harness: {cmd}",
+            }
+        )
+    return plan
+
+
+def _build_mixed_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
+    plan: list[PlanItem] = []
+    plan.extend(_domain_plan_items(cs, surface="gssc5_be", label="backend Bun"))
+    plan.extend(_domain_plan_items(cs, surface="gssc5_fe", label="FE"))
+    for cmd in commands[:4]:
         plan.append(
             {
                 "action": "run_focused",
@@ -590,13 +620,13 @@ def build_plan(
     surface = detect_work_surface(change_set=change_set) if change_set else "unknown"
     has_graph_contracts = any(c.get("graphId") for c in contracts)
     if change_set and not has_graph_contracts:
-        if surface == "gssc5_be" or (
-            surface in ("mixed", "unknown") and _be_files(change_set) and not _fe_files(change_set)
-        ):
+        has_be = bool(_be_files(change_set))
+        has_fe = bool(_fe_files(change_set))
+        if surface == "mixed" or (has_be and has_fe):
+            return _build_mixed_plan(change_set, commands)
+        if surface == "gssc5_be" or (has_be and not has_fe):
             return _build_be_plan(change_set, commands)
-        if surface == "gssc5_fe" or (
-            surface in ("mixed", "unknown") and _fe_files(change_set)
-        ):
+        if surface == "gssc5_fe" or has_fe:
             return _build_fe_plan(change_set, commands)
 
     for link in coverage:

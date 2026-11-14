@@ -195,6 +195,16 @@ async def synthesize(
     config: RunnableConfig,
 ) -> dict[str, Any]:
     configurable = (config or {}).get("configurable") or {}
+    cs = state.get("changeSet")
+    paths: list[str] = []
+    if isinstance(cs, dict):
+        paths = [
+            str(f.get("path") or "")
+            for f in (cs.get("files") or [])
+            if f.get("path")
+        ]
+    if not paths and state.get("files"):
+        paths = list((state.get("files") or {}).keys())
     synth_input: dict[str, Any] = {
         "verdict": state.get("verdict") or "",
         "summary": state.get("summary") or "",
@@ -202,6 +212,7 @@ async def synthesize(
         "plan": list(state.get("plan") or []),
         "findings": list(state.get("findings") or []),
         "gssc5ContextText": state.get("gssc5ContextText") or "",
+        "changeSetPaths": paths,
     }
     if configurable.get("synthesisEnabled") is not None:
         synth_input["enabled"] = configurable["synthesisEnabled"]

@@ -329,6 +329,104 @@ def _build_langgraph_plan(goal: str, change_set: ChangeSet | None) -> list[PlanS
     return steps
 
 
+def _existing_test_paths(cs: ChangeSet | None, *, surface: WorkSurface) -> list[str]:
+    """Return ``*.test.ts`` paths already present in the change set."""
+    if not cs:
+        return []
+    out: list[str] = []
+    for f in cs["files"]:
+        path = f["path"]
+        if f["status"] == "deleted":
+            continue
+        if not path.endswith(".test.ts") and not path.endswith(".test.js"):
+            continue
+        if classify_path(path) == surface:
+            out.append(path)
+    return out
+
+
+def _build_mixed_fe_be_plan(
+    goal: str, change_set: ChangeSet | None
+) -> list[PlanStep]:
+    """Dual-domain plan: BE Bun + FE ng — no winner-take-all."""
+    trimmed = goal.strip()
+    be = _be_paths(change_set)
+    fe = _fe_paths(change_set)
+    be_hint = ", ".join(f"`{p}`" for p in be[:4]) if be else "backend modules"
+    fe_hint = ", ".join(f"`{p}`" for p in fe[:4]) if fe else "FE modules"
+    be_tests = _existing_test_paths(change_set, surface="gssc5_be")
+    fe_tests = _existing_test_paths(change_set, surface="gssc5_fe")
+    be_test_hint = (
+        ", ".join(f"`{p}`" for p in be_tests[:3])
+        if be_tests
+        else "existing backend Bun tests in/near the change set"
+    )
+    fe_test_hint = (
+        ", ".join(f"`{p}`" for p in fe_tests[:3])
+        if fe_tests
+        else "existing FE `*.test.ts` in/near the change set"
+    )
+    return [
+        {
+            "id": "scope",
+            "title": "Scope mixed BE + FE work",
+            "detail": (
+                f'Confirm dual-domain goal: “{trimmed[:200]}'
+                f'{"…" if len(trimmed) > 200 else ""}”. '
+                f"Backend surfaces ({be_hint}) and FE surfaces ({fe_hint}) "
+                "both stay in scope — do not collapse to FE-only or BE-only."
+                if trimmed
+                else (
+                    "Mixed change set — keep both gssc5 backend (`apps/backend`) "
+                    "and FE (`apps/public|members|admin`) in scope."
+                )
+            ),
+        },
+        {
+            "id": "implement_be",
+            "title": "Implement BE behavior",
+            "detail": (
+                f"Change the smallest Elysia/Bun/Prisma set ({be_hint}). "
+                "Do not invent markers/tests absent from the change set."
+            ),
+        },
+        {
+            "id": "implement_fe",
+            "title": "Implement FE behavior",
+            "detail": (
+                f"Change the smallest Angular/Tailwind set ({fe_hint}). "
+                "Do not invent markers/tests absent from the change set."
+            ),
+        },
+        {
+            "id": "third_party",
+            "title": "Stay on each domain's stack",
+            "detail": (
+                "Backend: Bun/Elysia/Prisma/mise. FE: Angular/Tailwind/ng. "
+                "Do not apply FE harness advice to backend paths or vice versa."
+            ),
+        },
+        {
+            "id": "tests",
+            "title": "Run focused BE + FE tests",
+            "detail": (
+                f"BE: `bun test` / `mise run //backend:test` on existing loci "
+                f"({be_test_hint}). FE: `bunx ng test --watch=false` on "
+                f"existing loci ({fe_test_hint}). Prefer update of tests "
+                "already in the change set over inventing new paths."
+            ),
+        },
+        {
+            "id": "closeout",
+            "title": "Software closeout",
+            "detail": (
+                "Re-run `software_dev` with the mixed change set. Peer with "
+                "`test_development` for dual-domain Bun + ng closeout."
+            ),
+        },
+    ]
+
+
 def build_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
     """Build ordered plan steps from a goal string and optional change set."""
     surface: WorkSurface = detect_work_surface(goal, change_set)
@@ -336,11 +434,13 @@ def build_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
         return _build_fe_plan(goal, change_set)
     if surface == "gssc5_be":
         return _build_be_plan(goal, change_set)
-    # mixed / unknown / langgraph → langgraph service planner (safe default
-    # for this repo); mixed still gets langgraph steps plus FE path hints
-    # only when pure FE was not detected.
-    if surface == "mixed" and _fe_paths(change_set) and not _changed_graph_ids(
-        change_set
-    ):
-        return _build_fe_plan(goal, change_set)
+    if surface == "mixed":
+        has_fe = bool(_fe_paths(change_set))
+        has_be = bool(_be_paths(change_set))
+        if has_fe and has_be and not _changed_graph_ids(change_set):
+            return _build_mixed_fe_be_plan(goal, change_set)
+        if has_fe and not _changed_graph_ids(change_set):
+            return _build_fe_plan(goal, change_set)
+        if has_be and not _changed_graph_ids(change_set):
+            return _build_be_plan(goal, change_set)
     return _build_langgraph_plan(goal, change_set)

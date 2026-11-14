@@ -4,7 +4,7 @@ Contract for short-lived Cursor / Kaneo agents invoking assistant id `software_d
 
 Deterministic plan + software closeout checks are always model-free. gssc5 context loads via the **`software`** preset (`software-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
-**Work-surface specialization:** planners detect **gssc5 FE** (`apps/public|members|admin`, Angular/Tailwind), **gssc5 BE** (`gssc5-web/apps/backend`, Elysia/Prisma/Bun — `bun test` / `mise run //backend:test`), vs **langgraph service** (`src/gssc_langgraph/`, graphs). Backend-only change sets must not FE-default.
+**Work-surface specialization:** planners detect **gssc5 FE**, **gssc5 BE**, **mixed** (dual-domain BE Bun + FE ng — not winner-take-all), vs **langgraph service**. Backend-only must not FE-default; mixed must keep both. Synthesis must not invent markers/tests absent from `changeSet` paths.
 
 ## Input
 

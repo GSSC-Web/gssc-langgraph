@@ -269,3 +269,51 @@ def test_build_plan_specializes_for_gssc5_be() -> None:
     assert any("bun test" in s["detail"] or "mise run //backend:test" in s["detail"] for s in plan)
     assert not any("bunx ng" in s["detail"] for s in plan)
     assert not any("Scope the FE work" in s["title"] for s in plan)
+
+
+def test_build_plan_mixed_is_dual_domain_not_fe_only() -> None:
+    cs: ChangeSet = {
+        "label": "gssc5-60",
+        "files": [
+            {
+                "path": "gssc5-web/apps/backend/src/user/login-session.ts",
+                "status": "modified",
+                "content": "// @relation cookie helpers\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/user/accounts.ts",
+                "status": "modified",
+                "content": "// accounts login path\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/user/accounts.test.ts",
+                "status": "unchanged",
+                "content": "test('cookie', () => { expect(1).toBe(1) })\n",
+            },
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/services/member-session.ts"
+                ),
+                "status": "modified",
+                "content": "async logout() {}\n",
+            },
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/modules/header/header.ts"
+                ),
+                "status": "modified",
+                "content": "protected async logout() {}\n",
+            },
+        ],
+    }
+    plan = build_plan("ALM markers for orphan session/cookie SW", cs)
+    titles = [s["title"] for s in plan]
+    assert any("mixed" in t.lower() or "BE + FE" in t for t in titles)
+    assert any(s["id"] == "implement_be" for s in plan)
+    assert any(s["id"] == "implement_fe" for s in plan)
+    assert not any(s["title"] == "Scope the FE work" for s in plan)
+    assert not any(s["title"] == "Scope the BE work" for s in plan)
+    tests = next(s for s in plan if s["id"] == "tests")
+    assert "bun test" in tests["detail"] or "mise run //backend:test" in tests["detail"]
+    assert "ng test" in tests["detail"]
+    assert "accounts.test.ts" in tests["detail"]

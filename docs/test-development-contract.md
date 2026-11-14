@@ -4,7 +4,7 @@ Contract for short-lived Cursor / Kaneo agents invoking assistant id `test_devel
 
 Deterministic contract → coverage analysis is always model-free. gssc5 context loads via the **`test`** preset (`test-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
-**Work-surface specialization:** gssc5 FE → Angular `*.test.ts` / `bunx ng test`; gssc5 BE (`apps/backend`) → Bun `*.test.ts` / `bun test` / `mise run //backend:test` (not `ng test`); langgraph service → pytest / `graph.invoke`. Backend-only change sets must not FE-default.
+**Work-surface specialization:** FE → `ng test`; BE → `bun test` / `mise run //backend:test`; **mixed** → both. Only suggest test paths that exist in the change set (map source → nearest existing locus; never invent e.g. `login-session.test.ts` when tests live in `accounts.test.ts`).
 
 ## Input
 

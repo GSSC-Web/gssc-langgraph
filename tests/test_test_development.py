@@ -281,3 +281,69 @@ def test_be_change_set_prefers_bun_test_not_ng() -> None:
         "bunx ng" in (p.get("description") or "") for p in result["plan"]
     )
     assert verdict_from(result["findings"]) == "PASS"
+
+
+def test_mixed_change_set_dual_domain_no_invented_paths() -> None:
+    cs: ChangeSet = {
+        "label": "gssc5-60",
+        "files": [
+            {
+                "path": "gssc5-web/apps/backend/src/user/login-session.ts",
+                "status": "modified",
+                "content": "export function setLoginTokenCookie() {}\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/user/accounts.ts",
+                "status": "modified",
+                "content": "export const accounts = {}\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/user/accounts.test.ts",
+                "status": "unchanged",
+                "content": "test('cookie BLLR', () => { expect(1).toBe(1) })\n",
+            },
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/services/member-session.ts"
+                ),
+                "status": "modified",
+                "content": "async logout() { return true }\n",
+            },
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/services/"
+                    "member-session.test.ts"
+                ),
+                "status": "unchanged",
+                "content": "test('logout', () => { expect(1).toBe(1) })\n",
+            },
+            {
+                "path": (
+                    "gssc5-web/apps/public/src/app/modules/header/header.ts"
+                ),
+                "status": "modified",
+                "content": "protected async logout() {}\n",
+            },
+        ],
+    }
+    result = run_analysis(cs)
+    assert result["scopeGraphIds"] == []
+    assert any(
+        f["check"] == "scope"
+        and f["severity"] == "info"
+        and "mixed" in f["message"].lower()
+        for f in result["findings"]
+    )
+    assert any("mise run //backend:test" in c for c in result["commands"])
+    assert any(c.startswith("bun test ") and "accounts.test.ts" in c for c in result["commands"])
+    assert not any("login-session.test.ts" in c for c in result["commands"])
+    assert any("ng test" in c for c in result["commands"])
+    plan_paths = [p.get("path") or "" for p in result["plan"]]
+    assert "accounts.test.ts" in "".join(plan_paths)
+    assert "login-session.test.ts" not in "".join(plan_paths)
+    assert any(
+        "member-session.test.ts" in (p.get("path") or "")
+        or "member-session" in (p.get("description") or "")
+        for p in result["plan"]
+    )
+    assert verdict_from(result["findings"]) == "PASS"

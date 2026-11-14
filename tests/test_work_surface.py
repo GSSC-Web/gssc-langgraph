@@ -94,3 +94,25 @@ def test_bare_gssc5_web_backend_not_fe() -> None:
         )
         == "gssc5_be"
     )
+
+
+def test_detect_mixed_be_and_fe_paths() -> None:
+    surface = detect_work_surface(
+        change_set={
+            "label": "gssc5-60",
+            "files": [
+                {
+                    "path": "gssc5-web/apps/backend/src/user/login-session.ts",
+                    "status": "modified",
+                },
+                {
+                    "path": (
+                        "gssc5-web/apps/public/src/app/services/"
+                        "member-session.ts"
+                    ),
+                    "status": "modified",
+                },
+            ],
+        }
+    )
+    assert surface == "mixed"
