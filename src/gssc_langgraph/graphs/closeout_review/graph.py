@@ -8,6 +8,11 @@ diff with ``diff --git`` headers. Prose/summary ``diff`` alone yields
 
 Emits a v2 ``response`` GraphResponse envelope (GLG-35…46).
 
+Independent model-free checks fan out via LangGraph ``Send``; input ERROR
+uses ``Command(goto="finalize")`` so check workers are never scheduled
+(GLG-51). Findings are sorted deterministically before emit. TestDev stays
+linear — this fan-out is SoftDev/Closeout only.
+
 The ``langgraph.json`` export compiles **without** a custom checkpointer —
 Agent Server owns thread persistence (``POSTGRES_URI`` for durable store).
 ``reviewMemory`` accumulates across Agent Server / SDK threads. For unit
@@ -23,8 +28,14 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, Send
 
-from gssc_langgraph.closeout.checks import CHECK_RUNNERS, summarize, verdict_from
+from gssc_langgraph.closeout.checks import (
+    CHECK_RUNNERS,
+    check_scope,
+    summarize,
+    verdict_from,
+)
 from gssc_langgraph.closeout.synthesize import synthesize_closeout
 from gssc_langgraph.closeout.types import (
     ChangeSet,
@@ -141,6 +152,14 @@ def parse_changeset(state: CloseoutState) -> dict[str, Any]:
                 "fix": "Omit ChangedFile.content; keep diff --git only.",
             }
         )
+    # Lift scope input ERROR into parse so dispatch_checks can Command-skip
+    # workers (GLG-51) instead of walking every check node.
+    for finding in check_scope(cs):
+        code = str(finding.get("code") or "")
+        if finding.get("severity") == "error" and code.startswith(
+            ("changeset.", "input.")
+        ):
+            findings.append(finding)
     domains = pin_domains(
         change_set=cs,  # type: ignore[arg-type]
         domain_hint=state.get("domainHint"),
@@ -194,22 +213,21 @@ def load_gssc5_context_node(
     }
 
 
+def _has_input_error(state: CloseoutState) -> bool:
+    return any(
+        f.get("severity") == "error"
+        and str(f.get("code") or "").startswith(("changeset.", "input."))
+        for f in (state.get("findings") or [])
+    )
+
+
 def _make_check_node(check_id: CloseoutCheckId):
     def node(state: CloseoutState) -> dict[str, Any]:
-        if any(
-            f.get("severity") == "error"
-            and str(f.get("code") or "").startswith(("changeset.", "input."))
-            for f in (state.get("findings") or [])
-        ):
-            return {
-                "changeSet": state.get("changeSet") or build_change_set(state),
-                "checksRun": [check_id],
-                "steps": [f"check_{check_id}"],
-            }
+        # Do not write changeSet here — parallel Send workers must only
+        # touch reducer-backed channels (findings / checksRun / steps).
         cs = state.get("changeSet") or build_change_set(state)
         findings = CHECK_RUNNERS[check_id](cs)
         return {
-            "changeSet": cs,
             "findings": findings,
             "checksRun": [check_id],
             "steps": [f"check_{check_id}"],
@@ -219,8 +237,37 @@ def _make_check_node(check_id: CloseoutCheckId):
     return node
 
 
+def dispatch_checks(state: CloseoutState) -> Command:
+    """Fan-out independent checks via Send, or Command early-exit on ERROR."""
+    if _has_input_error(state):
+        return Command(goto="finalize", update={"steps": ["dispatch_checks"]})
+    return Command(
+        goto=[Send(f"check_{cid}", state) for cid in _CHECK_ORDER],
+        update={"steps": ["dispatch_checks"]},
+    )
+
+
+def _finding_sort_key(finding: dict[str, Any]) -> tuple[int, str, str]:
+    check = str(finding.get("check") or "")
+    order = {cid: i for i, cid in enumerate(_CHECK_ORDER)}
+    return (
+        order.get(check, 999),
+        str(finding.get("code") or ""),
+        str(finding.get("message") or ""),
+    )
+
+
+def sort_findings(findings: list[Any] | None) -> list[Any]:
+    return sorted(list(findings or []), key=_finding_sort_key)
+
+
+def sort_checks_run(checks: list[Any] | None) -> list[Any]:
+    order = {cid: i for i, cid in enumerate(_CHECK_ORDER)}
+    return sorted(list(checks or []), key=lambda c: order.get(str(c), 999))
+
+
 def finalize(state: CloseoutState) -> dict[str, Any]:
-    findings = list(state.get("findings") or [])
+    findings = sort_findings(state.get("findings"))
     verdict = verdict_from(findings)
     summary = summarize(verdict, findings)
     note: ReviewMemoryNote = {
@@ -274,8 +321,9 @@ def emit_response(state: CloseoutState) -> dict[str, Any]:
         state.get("gssc5Context"),  # type: ignore[arg-type]
         include_bodies=include_bodies,
     )
-    findings = normalize_findings(state.get("findings"))  # type: ignore[arg-type]
-    for i, raw in enumerate(state.get("findings") or []):
+    raw_findings = sort_findings(state.get("findings"))
+    findings = normalize_findings(raw_findings)  # type: ignore[arg-type]
+    for i, raw in enumerate(raw_findings):
         if raw.get("code") and i < len(findings):
             findings[i]["code"] = str(raw["code"])
     domains = list(state.get("domains") or []) or pin_domains(
@@ -289,7 +337,7 @@ def emit_response(state: CloseoutState) -> dict[str, Any]:
         or ""
     )
     payload: dict[str, Any] = {
-        "checksRun": list(state.get("checksRun") or []),
+        "checksRun": sort_checks_run(state.get("checksRun")),
         "kaneoTaskId": state.get("kaneoTaskId") or "",
         "prScope": state.get("prScope") or "",
         "uids": list(state.get("uids") or []),
@@ -335,6 +383,7 @@ _CHECK_ORDER: list[CloseoutCheckId] = [
 builder = StateGraph(CloseoutState)
 builder.add_node("parse_changeset", parse_changeset)
 builder.add_node("load_gssc5_context", load_gssc5_context_node)
+builder.add_node("dispatch_checks", dispatch_checks)
 for _cid in _CHECK_ORDER:
     builder.add_node(f"check_{_cid}", _make_check_node(_cid))
 builder.add_node("finalize", finalize)
@@ -343,16 +392,10 @@ builder.add_node("emit_response", emit_response)
 
 builder.add_edge(START, "parse_changeset")
 builder.add_edge("parse_changeset", "load_gssc5_context")
-builder.add_edge("load_gssc5_context", "check_scope")
-builder.add_edge("check_scope", "check_contracts")
-builder.add_edge("check_contracts", "check_software_trace")
-builder.add_edge("check_software_trace", "check_software_match")
-builder.add_edge("check_software_match", "check_software_quality")
-builder.add_edge("check_software_quality", "check_third_party")
-builder.add_edge("check_third_party", "check_test_coverage")
-builder.add_edge("check_test_coverage", "check_test_target")
-builder.add_edge("check_test_target", "check_secrets")
-builder.add_edge("check_secrets", "finalize")
+builder.add_edge("load_gssc5_context", "dispatch_checks")
+# dispatch_checks returns Command(Send…) or Command(goto=finalize).
+for _cid in _CHECK_ORDER:
+    builder.add_edge(f"check_{_cid}", "finalize")
 builder.add_edge("finalize", "synthesize")
 builder.add_edge("synthesize", "emit_response")
 builder.add_edge("emit_response", END)
