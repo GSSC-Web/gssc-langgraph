@@ -231,3 +231,53 @@ def test_fe_change_set_skips_no_graphs_warning() -> None:
         "graph.invoke" in (p.get("suggestedTest") or "") for p in result["plan"]
     )
     assert verdict_from(result["findings"]) == "PASS"
+
+
+def test_be_change_set_prefers_bun_test_not_ng() -> None:
+    cs: ChangeSet = {
+        "label": "gssc5-55",
+        "files": [
+            {
+                "path": "gssc5-web/apps/backend/src/kvs.ts",
+                "status": "modified",
+                "content": "export const kvs = {}\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/kvs.test.ts",
+                "status": "modified",
+                "content": "test('kvs', () => { expect(1).toBe(1) })\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/user/users.ts",
+                "status": "modified",
+                "content": "export const users = {}\n",
+            },
+        ],
+    }
+    result = run_analysis(cs)
+    assert result["scopeGraphIds"] == []
+    assert not any(
+        f["message"] == "No graphs in scope for test development"
+        for f in result["findings"]
+    )
+    assert any(
+        f["check"] == "scope"
+        and f["severity"] == "info"
+        and "backend" in f["message"].lower()
+        for f in result["findings"]
+    )
+    assert any("mise run //backend:test" in c for c in result["commands"])
+    assert any(c.startswith("bun test ") for c in result["commands"])
+    assert not any("ng test" in c for c in result["commands"])
+    assert any(
+        p["action"] in ("add_test", "update_test", "run_focused") for p in result["plan"]
+    )
+    assert not any(
+        "Lexical" in (p.get("description") or "")
+        or "Angular" in (p.get("description") or "")
+        for p in result["plan"]
+    )
+    assert not any(
+        "bunx ng" in (p.get("description") or "") for p in result["plan"]
+    )
+    assert verdict_from(result["findings"]) == "PASS"

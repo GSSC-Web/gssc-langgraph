@@ -11,7 +11,11 @@ from __future__ import annotations
 import re
 
 from gssc_langgraph.software.types import ChangeSet, PlanStep
-from gssc_langgraph.work_surface import WorkSurface, detect_work_surface
+from gssc_langgraph.work_surface import (
+    WorkSurface,
+    classify_path,
+    detect_work_surface,
+)
 
 GRAPH_FILE_RE = re.compile(
     r"^(?:src/gssc_langgraph/graphs|src/graphs)/([^/]+)/graph\.py$"
@@ -42,13 +46,20 @@ def _fe_paths(cs: ChangeSet | None) -> list[str]:
         path = f["path"]
         if f["status"] in ("unchanged", "deleted"):
             continue
-        if (
-            "gssc5-web/" in path
-            or "/prompt-overlay/" in path
-            or path.endswith(".html")
-            or ".component." in path
-            or path.endswith(".test.ts")
-        ):
+        if classify_path(path) == "gssc5_fe":
+            out.append(path)
+    return out[:12]
+
+
+def _be_paths(cs: ChangeSet | None) -> list[str]:
+    if not cs:
+        return []
+    out: list[str] = []
+    for f in cs["files"]:
+        path = f["path"]
+        if f["status"] in ("unchanged", "deleted"):
+            continue
+        if classify_path(path) == "gssc5_be":
             out.append(path)
     return out[:12]
 
@@ -114,19 +125,23 @@ def _build_fe_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
 
 def _build_be_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
     trimmed = goal.strip()
+    paths = _be_paths(change_set)
+    path_hint = (
+        ", ".join(f"`{p}`" for p in paths[:5]) if paths else "touched backend modules"
+    )
     steps: list[PlanStep] = [
         {
             "id": "scope",
             "title": "Scope the BE work",
             "detail": (
-                f'Confirm in-scope gssc5 API/backend goal: “{trimmed[:200]}'
+                f'Confirm in-scope gssc5 Elysia/Bun backend goal: “{trimmed[:200]}'
                 f'{"…" if len(trimmed) > 200 else ""}”. '
-                "Do not default to LangGraph graph paths unless the ticket "
-                "touches this service."
+                "Do not plan Angular/Tailwind FE scaffolds or LangGraph graphs "
+                "for backend-only tickets."
                 if trimmed
                 else (
-                    "No free-text goal — treat the gssc5 backend change set "
-                    "as software closeout scope."
+                    "No free-text goal — treat the gssc5 backend "
+                    "(`apps/backend`) change set as software closeout scope."
                 )
             ),
         },
@@ -134,33 +149,36 @@ def _build_be_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
             "id": "implement",
             "title": "Implement BE behavior",
             "detail": (
-                "Change the smallest set of gssc5 API/backend modules for "
-                "the ticket. Keep contracts with the public/members apps "
-                "stable unless the task explicitly widens them."
+                f"Change the smallest set of Elysia/Prisma backend modules "
+                f"({path_hint}). Keep public/members app contracts stable "
+                "unless the task explicitly widens them."
             ),
         },
         {
             "id": "third_party",
             "title": "Stay on the gssc5 BE stack",
             "detail": (
-                "Prefer the existing gssc5 backend toolchain. Do not scaffold "
-                "Python LangGraph assistants for pure gssc5 API work."
+                "Use the gssc5-web backend toolchain (Bun, Elysia, Prisma/"
+                "Prismabox, mise). Do not invent Angular component harnesses "
+                "or Python LangGraph assistants for pure backend work."
             ),
         },
         {
             "id": "tests",
             "title": "Run focused BE tests",
             "detail": (
-                "Add/update the project's existing unit/integration tests for "
-                "touched handlers; keep asserts tied to the API contract."
+                "Add/update companion Bun `*.test.ts` beside sources. Prefer "
+                "`bun test <path>` or `mise run //backend:test` on focused "
+                "suites — not the Angular FE harness."
             ),
         },
         {
             "id": "closeout",
             "title": "Software closeout",
             "detail": (
-                "Re-run `software_dev` with populated `files` or a unified "
-                "diff; peer with `test_development` for test closeout."
+                "Re-run `software_dev` with a structured change set "
+                "(`files` / unified diff). Peer with `test_development` for "
+                "backend Bun test closeout — not FE Lexical stubs."
             ),
         },
     ]

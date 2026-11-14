@@ -48,3 +48,49 @@ def test_detect_fe_from_goal() -> None:
         detect_work_surface("Fix Angular Prompt Overlay Tailwind failure tokens")
         == "gssc5_fe"
     )
+
+
+def test_detect_gssc5_be_from_backend_paths() -> None:
+    surface = detect_work_surface(
+        change_set={
+            "label": "gssc5-56",
+            "files": [
+                {
+                    "path": "gssc5-web/apps/backend/src/login-session.ts",
+                    "status": "modified",
+                },
+                {
+                    "path": "gssc5-web/apps/backend/src/user/users.ts",
+                    "status": "modified",
+                },
+            ],
+        }
+    )
+    assert surface == "gssc5_be"
+
+
+def test_detect_be_from_elysia_goal() -> None:
+    assert (
+        detect_work_surface(
+            "Consolidate Elysia login-session helpers with Prisma selects"
+        )
+        == "gssc5_be"
+    )
+
+
+def test_bare_gssc5_web_backend_not_fe() -> None:
+    """Regression: bare gssc5-web/ must not classify apps/backend as FE."""
+    assert (
+        detect_work_surface(
+            change_set={
+                "label": "pr",
+                "files": [
+                    {
+                        "path": "gssc5-web/apps/backend/src/kvs.ts",
+                        "status": "modified",
+                    }
+                ],
+            }
+        )
+        == "gssc5_be"
+    )

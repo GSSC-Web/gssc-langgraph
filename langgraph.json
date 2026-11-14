@@ -17,11 +17,11 @@
     },
     "test_development": {
       "path": "./src/gssc_langgraph/graphs/test_development/graph.py:graph",
-      "description": "Test plan/closeout with optional xAI synthesis. Specializes for gssc5 FE/BE (Angular *.test.ts / bunx ng test) vs langgraph service (pytest/graph.invoke)."
+      "description": "Test plan/closeout with optional xAI synthesis. Specializes gssc5 FE (ng test), gssc5 BE apps/backend (bun test / mise //backend:test), vs langgraph service (pytest/graph.invoke)."
     },
     "software_dev": {
       "path": "./src/gssc_langgraph/graphs/software_dev/graph.py:graph",
-      "description": "Software plan/closeout with optional xAI synthesis. Specializes for gssc5 FE/BE (Angular/Tailwind) vs langgraph Python service graphs."
+      "description": "Software plan/closeout with optional xAI synthesis. Specializes gssc5 FE (Angular/Tailwind), gssc5 BE (Elysia/Bun/Prisma under apps/backend), vs langgraph Python service graphs."
     }
   },
   "env": ".env",
