@@ -2,6 +2,8 @@
 
 Contract for short-lived Cursor / Kaneo agents invoking assistant id `test_development` (or `uv run test-dev --json`).
 
+**v2 envelope:** `response.schemaVersion: "2"` with `domains` and `payload.testCases` / `payload.gaps`. Blocking gaps → `FAIL`. Optional `requirements` / `domainHint`. See [graph-response-v2.md](graph-response-v2.md).
+
 Deterministic contract → coverage analysis is always model-free. gssc5 context loads via the **`test`** preset (`test-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
 **Work-surface specialization:** FE → `ng test`; BE → `bun test` / `mise run //backend:test`; **mixed** → both. Only suggest test paths that exist in the change set (map source → nearest existing locus; never invent e.g. `login-session.test.ts` when tests live in `accounts.test.ts`).

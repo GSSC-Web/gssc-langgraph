@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-TestDevVerdict = Literal["PASS", "FAIL"]
+TestDevVerdict = Literal["PASS", "FAIL", "ERROR"]
 FindingSeverity = Literal["error", "warning", "info"]
+TestCaseStatus = Literal["present", "missing", "suggested"]
 
 TestDevCheckId = Literal[
     "scope",
@@ -35,6 +36,7 @@ class Finding(TypedDict):
     graphId: NotRequired[str]
     contractId: NotRequired[str]
     fix: NotRequired[str]
+    code: NotRequired[str]
 
 
 class Contract(TypedDict):
@@ -61,6 +63,26 @@ class PlanItem(TypedDict):
     contractId: NotRequired[str]
     path: NotRequired[str]
     suggestedTest: NotRequired[str]
+    domain: NotRequired[str]
+
+
+class TestCase(TypedDict):
+    id: str
+    title: str
+    assertion: str
+    status: TestCaseStatus
+    uid: NotRequired[str]
+    path: NotRequired[str]
+    domain: NotRequired[str]
+
+
+class CoverageGap(TypedDict):
+    id: str
+    title: str
+    severity: FindingSeverity
+    detail: str
+    uid: NotRequired[str]
+    domain: NotRequired[str]
 
 
 class ChangedFile(TypedDict):

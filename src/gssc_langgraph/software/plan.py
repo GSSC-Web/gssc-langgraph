@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import re
 
-from gssc_langgraph.software.types import ChangeSet, PlanStep
+from gssc_langgraph.envelope.domains import pin_domains
+from gssc_langgraph.envelope.types import DomainId
+from gssc_langgraph.software.types import ChangeSet, PlanStep, PlanStepKind
 from gssc_langgraph.work_surface import (
     WorkSurface,
     classify_path,
@@ -427,20 +429,165 @@ def _build_mixed_fe_be_plan(
     ]
 
 
-def build_plan(goal: str, change_set: ChangeSet | None) -> list[PlanStep]:
-    """Build ordered plan steps from a goal string and optional change set."""
-    surface: WorkSurface = detect_work_surface(goal, change_set)
-    if surface == "gssc5_fe":
-        return _build_fe_plan(goal, change_set)
+_KIND_BY_ID: dict[str, PlanStepKind] = {
+    "scope": "other",
+    "implement": "implement",
+    "implement_be": "implement",
+    "implement_fe": "implement",
+    "implement_graphs": "implement",
+    "scaffold_graph": "implement",
+    "register": "alm",
+    "reproduce_fix": "test",
+    "third_party": "other",
+    "tests": "test",
+    "closeout": "alm",
+}
+
+
+def _default_domain_for_surface(surface: WorkSurface) -> DomainId:
     if surface == "gssc5_be":
-        return _build_be_plan(goal, change_set)
+        return "backend"
+    if surface == "gssc5_fe":
+        return "public-fe"
+    if surface == "langgraph":
+        return "langgraph"
+    if surface == "mixed":
+        return "backend"
+    return "unknown"
+
+
+def _commands_for_step(step_id: str, domain: DomainId) -> list[str]:
+    if step_id != "tests" and not step_id.startswith("implement"):
+        if step_id == "closeout":
+            return ["software_dev", "test_development"]
+        return []
+    if domain == "backend":
+        return ["bun test", "mise run //backend:test"]
+    if domain in ("public-fe", "members-fe", "admin-fe"):
+        return ["bunx ng test --watch=false"]
+    if domain == "langgraph":
+        return ["uv run pytest"]
+    return []
+
+
+def _annotate_plan(
+    steps: list[PlanStep],
+    *,
+    surface: WorkSurface,
+    change_set: ChangeSet | None,
+    domains: list[DomainId],
+) -> list[PlanStep]:
+    """Attach domain / kind / paths / commands for v2 payload.plan[] (GLG-42)."""
+    primary = domains[0] if domains else _default_domain_for_surface(surface)
+    be_paths = _be_paths(change_set)
+    fe_paths = _fe_paths(change_set)
+    be_tests = _existing_test_paths(change_set, surface="gssc5_be")
+    fe_tests = _existing_test_paths(change_set, surface="gssc5_fe")
+    out: list[PlanStep] = []
+    for step in steps:
+        sid = step["id"]
+        domain: DomainId = primary
+        paths: list[str] = []
+        if sid in ("implement_be",) or (
+            sid == "tests" and "backend" in domains and "public-fe" not in domains
+        ):
+            domain = "backend"
+            paths = be_paths if sid.startswith("implement") else be_tests
+        elif sid in ("implement_fe",):
+            domain = next(
+                (d for d in domains if d.endswith("-fe")),
+                "public-fe",
+            )
+            paths = fe_paths
+        elif sid == "tests" and surface == "mixed":
+            # Dual-domain test step: tag backend primary; FE commands still listed.
+            domain = "backend"
+            paths = be_tests + fe_tests
+        elif sid == "tests" and surface == "gssc5_fe":
+            domain = next((d for d in domains if d.endswith("-fe")), "public-fe")
+            paths = fe_tests
+        elif sid == "tests" and surface == "gssc5_be":
+            domain = "backend"
+            paths = be_tests
+        elif surface == "gssc5_fe":
+            domain = next((d for d in domains if d.endswith("-fe")), "public-fe")
+            paths = fe_paths if sid.startswith("implement") else []
+        elif surface == "gssc5_be":
+            domain = "backend"
+            paths = be_paths if sid.startswith("implement") else []
+        elif surface == "langgraph":
+            domain = "langgraph"
+
+        kind = _KIND_BY_ID.get(sid, "other")
+        commands = _commands_for_step(sid, domain)
+        if sid == "tests" and surface == "mixed":
+            commands = [
+                "bun test",
+                "mise run //backend:test",
+                "bunx ng test --watch=false",
+            ]
+        annotated: PlanStep = {
+            **step,
+            "domain": domain,
+            "kind": kind,
+            "paths": paths[:12],
+            "commands": commands,
+        }
+        out.append(annotated)
+    return out
+
+
+def build_plan(
+    goal: str,
+    change_set: ChangeSet | None,
+    *,
+    requirements: str = "",
+    domain_hint: str | list[str] | None = None,
+) -> list[PlanStep]:
+    """Build ordered plan steps from a goal string and optional change set."""
+    surface: WorkSurface = detect_work_surface(
+        goal, change_set, requirements=requirements
+    )
+    domains = pin_domains(
+        goal=goal,
+        requirements=requirements,
+        change_set=change_set,
+        domain_hint=domain_hint,
+    )
+    if domain_hint and "backend" in domains and not any(
+        d.endswith("-fe") for d in domains
+    ):
+        steps = _build_be_plan(goal, change_set)
+        return _annotate_plan(steps, surface="gssc5_be", change_set=change_set, domains=domains)
+    if domain_hint and any(d.endswith("-fe") for d in domains) and "backend" not in domains:
+        steps = _build_fe_plan(goal, change_set)
+        return _annotate_plan(steps, surface="gssc5_fe", change_set=change_set, domains=domains)
+
+    if surface == "gssc5_fe":
+        steps = _build_fe_plan(goal, change_set)
+        return _annotate_plan(steps, surface=surface, change_set=change_set, domains=domains)
+    if surface == "gssc5_be":
+        steps = _build_be_plan(goal, change_set)
+        return _annotate_plan(steps, surface=surface, change_set=change_set, domains=domains)
     if surface == "mixed":
         has_fe = bool(_fe_paths(change_set))
         has_be = bool(_be_paths(change_set))
         if has_fe and has_be and not _changed_graph_ids(change_set):
-            return _build_mixed_fe_be_plan(goal, change_set)
+            steps = _build_mixed_fe_be_plan(goal, change_set)
+            return _annotate_plan(
+                steps, surface="mixed", change_set=change_set, domains=domains
+            )
         if has_fe and not _changed_graph_ids(change_set):
-            return _build_fe_plan(goal, change_set)
+            steps = _build_fe_plan(goal, change_set)
+            return _annotate_plan(
+                steps, surface="gssc5_fe", change_set=change_set, domains=domains
+            )
         if has_be and not _changed_graph_ids(change_set):
-            return _build_be_plan(goal, change_set)
-    return _build_langgraph_plan(goal, change_set)
+            steps = _build_be_plan(goal, change_set)
+            return _annotate_plan(
+                steps, surface="gssc5_be", change_set=change_set, domains=domains
+            )
+    steps = _build_langgraph_plan(goal, change_set)
+    return _annotate_plan(
+        steps, surface="langgraph", change_set=change_set, domains=domains or ["langgraph"]
+    )

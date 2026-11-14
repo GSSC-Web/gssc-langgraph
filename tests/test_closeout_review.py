@@ -357,10 +357,11 @@ def test_fails_on_committed_secret_looking_keys() -> None:
 
 def test_scope_errors_when_empty() -> None:
     findings = check_scope(None)
-    assert verdict_from(findings) == "FAIL"
+    assert verdict_from(findings) == "ERROR"
+    assert any(f.get("code") == "changeset.required" for f in findings)
 
 
-def test_scope_soft_warns_on_prose_diff_without_files() -> None:
+def test_scope_errors_on_prose_diff_without_files() -> None:
     findings = check_scope(
         {
             "label": "prose",
@@ -371,10 +372,11 @@ def test_scope_soft_warns_on_prose_diff_without_files() -> None:
             ),
         }
     )
-    assert verdict_from(findings) == "PASS"
+    assert verdict_from(findings) == "ERROR"
     assert any(
         f["check"] == "scope"
-        and f["severity"] == "warning"
+        and f["severity"] == "error"
+        and f.get("code") == "changeset.required"
         and "Prose/summary" in f["message"]
         for f in findings
     )
@@ -382,7 +384,7 @@ def test_scope_soft_warns_on_prose_diff_without_files() -> None:
 
 
 @pytest.mark.asyncio
-async def test_graph_soft_pass_on_prose_diff() -> None:
+async def test_graph_errors_on_prose_diff() -> None:
     result = await closeout_graph.ainvoke(
         {
             "label": "gssc5-54-prose",
@@ -396,7 +398,9 @@ async def test_graph_soft_pass_on_prose_diff() -> None:
             }
         },
     )
-    assert result["verdict"] == "PASS"
+    assert result["verdict"] == "ERROR"
+    assert result["response"]["schemaVersion"] == "2"
+    assert result["response"]["verdict"] == "ERROR"
     assert any(
-        f["check"] == "scope" and f["severity"] == "warning" for f in result["findings"]
+        f.get("code") == "changeset.required" for f in result["response"]["findings"]
     )

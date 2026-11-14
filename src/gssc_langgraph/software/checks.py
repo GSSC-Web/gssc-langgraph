@@ -655,6 +655,12 @@ CHECK_RUNNERS: dict[
 
 
 def verdict_from(findings: list[SoftwareFinding]) -> SoftwareVerdict:
+    if any(
+        f.get("severity") == "error"
+        and str(f.get("code") or "").startswith(("changeset.", "input."))
+        for f in findings
+    ):
+        return "ERROR"
     return "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
 
 
@@ -666,6 +672,8 @@ def summarize(
     errors = sum(1 for f in findings if f["severity"] == "error")
     warnings = sum(1 for f in findings if f["severity"] == "warning")
     plan_bit = f"{plan_count} plan step(s)"
+    if verdict == "ERROR":
+        return f"ERROR — fix inputs and retry ({errors} input issue(s))."
     if verdict == "PASS" and warnings == 0:
         return f"PASS — {plan_bit}, no findings."
     if verdict == "PASS":

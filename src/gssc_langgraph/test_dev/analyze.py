@@ -17,12 +17,15 @@ from gssc_langgraph.test_dev.contracts import (
     resolve_contracts,
 )
 from gssc_langgraph.test_dev.criteria import CONFLICT_GUIDANCE
+from gssc_langgraph.envelope.domains import pin_domains
 from gssc_langgraph.test_dev.types import (
     ChangeSet,
     Contract,
+    CoverageGap,
     CoverageLink,
     Finding,
     PlanItem,
+    TestCase,
     TestDevCheckId,
     TestDevVerdict,
 )
@@ -696,9 +699,142 @@ def test_{c["id"].replace(".", "_")}():
 '''
 
 
-def run_analysis(cs: ChangeSet) -> dict[str, object]:
+_BOUNDARY_RE = re.compile(
+    r"(?i)\b(straddl\w*|boundary|cross[- ]field|needle|negative case|"
+    r"o\\nW|edge case)\b"
+)
+_UID_RE = re.compile(r"\b([A-Z]{2,6}-\d+)\b")
+
+
+def build_test_cases_and_gaps(
+    cs: ChangeSet,
+    contracts: list[Contract],
+    coverage: list[CoverageLink],
+    *,
+    requirements: str = "",
+) -> tuple[list[TestCase], list[CoverageGap], list[Finding]]:
+    """Map contracts + requirement cues → testCases/gaps (GLG-40).
+
+    Contract gaps are listed for the payload; blocking FAIL for those
+    still comes from existing coverage_map findings. Requirement-derived
+    boundary cases add explicit blocking findings when missing.
+    """
+    cases: list[TestCase] = []
+    gaps: list[CoverageGap] = []
+    extra_findings: list[Finding] = []
+    domains = pin_domains(change_set=cs, requirements=requirements)
+    primary = domains[0] if domains else "unknown"
+    cov_by_id = {c["contractId"]: c for c in coverage}
+
+    for c in contracts:
+        link = cov_by_id.get(c["id"])
+        covered = bool(link and link.get("covered"))
+        status = "present" if covered else "missing"
+        case: TestCase = {
+            "id": c["id"],
+            "title": c["title"],
+            "assertion": "; ".join(c.get("assertHints") or []) or c["requirement"],
+            "status": status,  # type: ignore[typeddict-item]
+            "domain": primary,
+        }
+        if link and link.get("testPath"):
+            case["path"] = link["testPath"]
+        cases.append(case)
+        if not covered:
+            gaps.append(
+                {
+                    "id": f"gap.{c['id']}",
+                    "title": f"Missing coverage: {c['title']}",
+                    "severity": "error",
+                    "detail": c["requirement"],
+                    "domain": primary,
+                }
+            )
+
+    req = requirements.strip()
+    if req and _BOUNDARY_RE.search(req):
+        uids = _UID_RE.findall(req)
+        uid = uids[0] if uids else None
+        body_blob = " ".join(
+            (f.get("content") or "") for f in cs.get("files") or [] if isinstance(f, dict)
+        )
+        present = bool(
+            re.search(r"(?i)straddl|boundary|needle|o\\nW|cross.?field", body_blob)
+        )
+        case_id = f"req.boundary.{uid or 'case'}"
+        title = "Boundary / straddling-needle negative"
+        case2: TestCase = {
+            "id": case_id,
+            "title": title,
+            "assertion": "Cover the boundary/negative case required by the ticket",
+            "status": "present" if present else "missing",
+            "domain": primary,
+        }
+        if uid:
+            case2["uid"] = uid
+        cases.append(case2)
+        if not present:
+            gap2: CoverageGap = {
+                "id": f"gap.{case_id}",
+                "title": title,
+                "severity": "error",
+                "detail": (
+                    "Ticket requires a boundary/straddling/needle negative case "
+                    "that is not evidenced in the change set tests"
+                ),
+                "domain": primary,
+            }
+            if uid:
+                gap2["uid"] = uid
+            gaps.append(gap2)
+            finding: Finding = {
+                "check": "coverage_map",
+                "severity": "error",
+                "code": "gap.boundary_required",
+                "message": gap2["detail"],
+            }
+            if uid:
+                finding["contractId"] = uid
+            extra_findings.append(finding)
+
+    return cases, gaps, extra_findings
+
+
+def run_analysis(
+    cs: ChangeSet,
+    *,
+    requirements: str = "",
+) -> dict[str, object]:
+    from gssc_langgraph.work_surface import looks_like_unified_diff
+
     checks_run: list[TestDevCheckId] = []
     findings: list[Finding] = []
+
+    files = cs.get("files") or []
+    diff = cs.get("diff") or ""
+    if not files and not looks_like_unified_diff(diff):
+        findings.append(
+            {
+                "check": "scope",
+                "severity": "error",
+                "code": "changeset.required",
+                "message": (
+                    "TestDev requires changeSet.files or a unified "
+                    "`diff --git` (input ERROR)"
+                ),
+            }
+        )
+        return {
+            "scopeGraphIds": [],
+            "contracts": [],
+            "coverage": [],
+            "findings": findings,
+            "checksRun": ["scope"],
+            "plan": [],
+            "commands": [],
+            "testCases": [],
+            "gaps": [],
+        }
 
     graph_ids, scope_findings = resolve_scope(cs)
     checks_run.append("scope")
@@ -724,6 +860,11 @@ def run_analysis(cs: ChangeSet) -> dict[str, object]:
 
     plan = build_plan(contracts, coverage, findings, commands, change_set=cs)
 
+    test_cases, gaps, gap_findings = build_test_cases_and_gaps(
+        cs, contracts, coverage, requirements=requirements
+    )
+    findings.extend(gap_findings)
+
     return {
         "scopeGraphIds": graph_ids,
         "contracts": contracts,
@@ -732,10 +873,18 @@ def run_analysis(cs: ChangeSet) -> dict[str, object]:
         "checksRun": checks_run,
         "plan": plan,
         "commands": commands,
+        "testCases": test_cases,
+        "gaps": gaps,
     }
 
 
 def verdict_from(findings: list[Finding]) -> TestDevVerdict:
+    if any(
+        f.get("severity") == "error"
+        and str(f.get("code") or "").startswith(("changeset.", "input."))
+        for f in findings
+    ):
+        return "ERROR"
     return "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
 
 
@@ -747,6 +896,8 @@ def summarize(
     errors = sum(1 for f in findings if f["severity"] == "error")
     warnings = sum(1 for f in findings if f["severity"] == "warning")
     adds = sum(1 for p in plan if p["action"] == "add_test")
+    if verdict == "ERROR":
+        return f"ERROR — fix inputs and retry ({errors} input issue(s))."
     if verdict == "PASS" and warnings == 0 and adds == 0:
         return "PASS — in-scope contracts have permanent tests."
     if verdict == "PASS":

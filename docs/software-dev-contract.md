@@ -2,6 +2,8 @@
 
 Contract for short-lived Cursor / Kaneo agents invoking assistant id `software_dev` (or `uv run software --json`).
 
+**v2 envelope:** `response.schemaVersion: "2"` with `domains`, `digest`, `friction`, and structured `payload.plan[]` (`domain`/`kind`/`paths`/`commands`). Optional `domainHint`. See [graph-response-v2.md](graph-response-v2.md).
+
 Deterministic plan + software closeout checks are always model-free. gssc5 context loads via the **`software`** preset (`software-closeout-review`). Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
 **Work-surface specialization:** planners detect **gssc5 FE**, **gssc5 BE**, **mixed** (dual-domain BE Bun + FE ng — not winner-take-all), vs **langgraph service**. Backend-only must not FE-default; mixed must keep both. Synthesis must not invent markers/tests absent from `changeSet` paths.
