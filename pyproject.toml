@@ -1,6 +1,6 @@
 [project]
 name = "gssc-langgraph"
-version = "26.11.3"
+version = "26.11.4"
 description = "Standalone LangGraph (Python) Agent Server for GSSC-Web — MCP endpoint at /mcp."
 readme = "README.md"
 authors = [
