@@ -162,15 +162,16 @@ def check_scope(cs: ChangeSet | None) -> list[CloseoutFinding]:
 
     diff = (cs or {}).get("diff") or ""
     if diff.strip() and not looks_like_unified_diff(diff):
-        # Soft first pass: prose/summary diffs used to hard-FAIL; guide retry.
+        # GLG-36: prose-only → ERROR (not soft warning / ambiguous FAIL).
         findings.append(
             {
                 "check": "scope",
-                "severity": "warning",
+                "severity": "error",
+                "code": "changeset.required",
                 "message": (
                     "Prose/summary `diff` has no `diff --git` paths and no "
                     "`files` / `changeSet.files` — closeout cannot scope "
-                    "file checks on this pass"
+                    "file checks (input ERROR)"
                 ),
                 "fix": _PROSE_DIFF_FIX,
             }
@@ -195,6 +196,7 @@ def check_scope(cs: ChangeSet | None) -> list[CloseoutFinding]:
         {
             "check": "scope",
             "severity": "error",
+            "code": "changeset.required",
             "message": "No change set — nothing in scope for closeout review",
             "fix": (
                 "Pass populated `files` / `changeSet.files`, a git range / "
@@ -919,12 +921,24 @@ CHECK_RUNNERS: dict[
 
 
 def verdict_from(findings: list[CloseoutFinding]) -> CloseoutVerdict:
+    """PASS / FAIL / ERROR. Input problems (changeset.required) → ERROR."""
+    if any(
+        f.get("severity") == "error"
+        and (
+            f.get("code") == "changeset.required"
+            or str(f.get("code") or "").startswith("input.")
+        )
+        for f in findings
+    ):
+        return "ERROR"
     return "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
 
 
 def summarize(verdict: CloseoutVerdict, findings: list[CloseoutFinding]) -> str:
     errors = sum(1 for f in findings if f["severity"] == "error")
     warnings = sum(1 for f in findings if f["severity"] == "warning")
+    if verdict == "ERROR":
+        return f"ERROR — fix inputs and retry ({errors} input issue(s))."
     if verdict == "PASS" and warnings == 0:
         return "PASS — closeout review clean."
     if verdict == "PASS":

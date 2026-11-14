@@ -111,7 +111,7 @@ Smoke assistants (`health`, `conversation`) are **model-free**. Specialists keep
 
 Also: HTTP `GET /ok` for process probes.
 
-I/O contracts: [docs/closeout-review-contract.md](docs/closeout-review-contract.md), [docs/software-dev-contract.md](docs/software-dev-contract.md), [docs/test-development-contract.md](docs/test-development-contract.md).
+I/O contracts: [docs/graph-response-v2.md](docs/graph-response-v2.md) (shared v2 envelope — branch on `response.verdict`), [docs/closeout-review-contract.md](docs/closeout-review-contract.md), [docs/software-dev-contract.md](docs/software-dev-contract.md), [docs/test-development-contract.md](docs/test-development-contract.md).
 
 ## Agent Server auth
 

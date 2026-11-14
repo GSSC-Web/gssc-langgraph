@@ -3,6 +3,9 @@ synthesis).
 
 Invoke via Agent Server assistant id ``software_dev``, or ``software`` CLI.
 
+Emits a v2 ``response`` GraphResponse envelope (GLG-35…46) so coordinators
+can branch on ``response.verdict`` without parsing narrative.
+
 The ``langgraph.json`` export compiles **without** a custom checkpointer —
 Agent Server owns thread persistence (``POSTGRES_URI`` for durable store).
 ``specialistNotes`` accumulate across Agent Server / SDK threads. For unit
@@ -19,6 +22,13 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from gssc_langgraph.envelope import (
+    build_graph_response,
+    context_ref_from_bundle,
+    normalize_findings,
+    pin_domains,
+    strip_oversized_content,
+)
 from gssc_langgraph.gssc5 import format_gssc5_context, load_gssc5_context_for_role
 from gssc_langgraph.gssc5.types import Gssc5ContextBundle
 from gssc_langgraph.software.checks import CHECK_RUNNERS, summarize, verdict_from
@@ -53,6 +63,8 @@ class SoftwareState(TypedDict, total=False):
     label: str
     fileStatuses: dict[str, FileStatus]
     changeSet: ChangeSet | None
+    domainHint: str | list[str]
+    includeContextBodies: bool
     plan: Annotated[list[PlanStep], replace_list]
     findings: Annotated[list[SoftwareFinding], add]
     checksRun: Annotated[list[SoftwareCheckId], add]
@@ -66,6 +78,9 @@ class SoftwareState(TypedDict, total=False):
     synthesisNote: str
     specialistNotes: Annotated[list[SpecialistNote], add]
     steps: Annotated[list[str], add]
+    response: dict[str, Any]
+    schemaVersion: str
+    domains: list[str]
 
 
 _DIFF_PATH_RE = re.compile(r"^diff --git a/(.+?) b/(.+)$", re.MULTILINE)
@@ -105,9 +120,40 @@ def build_change_set(state: SoftwareState) -> ChangeSet | None:
 
 
 def parse_input(state: SoftwareState) -> dict[str, Any]:
+    cs = build_change_set(state)
+    findings: list[SoftwareFinding] = []
+    cs, stripped = strip_oversized_content(cs)  # type: ignore[arg-type]
+    if stripped:
+        # Keep path+status; warn. ERROR only when nothing usable remains.
+        has_paths = bool((cs or {}).get("files"))
+        severity = "warning" if has_paths else "error"
+        findings.append(
+            {
+                "check": "scope",
+                "severity": severity,  # type: ignore[typeddict-item]
+                "code": "input.content_too_large",
+                "message": (
+                    "Lean changeSet: stripped oversized embedded content for "
+                    f"{', '.join(stripped[:5])}. Prefer path+status + "
+                    "unified diff (≤32KB request guidance)."
+                ),
+                "fix": "Omit ChangedFile.content; use diff --git headers.",
+            }
+        )
+    goal = (state.get("goal") or "").strip()
+    if not goal and not cs:
+        findings.append(
+            {
+                "check": "scope",
+                "severity": "error",
+                "code": "input.goal_or_changeset_required",
+                "message": "SoftDev requires a goal and/or a changeSet (input ERROR)",
+            }
+        )
     return {
-        "changeSet": build_change_set(state),
+        "changeSet": cs,
         "goal": state.get("goal") or "",
+        "findings": findings,
         "steps": ["parse_input"],
     }
 
@@ -143,15 +189,34 @@ def plan_work(state: SoftwareState) -> dict[str, Any]:
     goal = (state.get("goal") or "").strip()
     req = (state.get("requirements") or "").strip()
     combined = "\n".join(part for part in [goal, req] if part)
-    plan = build_plan(combined or goal, state.get("changeSet"))
+    plan = build_plan(
+        combined or goal,
+        state.get("changeSet"),
+        requirements=req,
+        domain_hint=state.get("domainHint"),
+    )
+    domains = pin_domains(
+        goal=goal,
+        requirements=req,
+        change_set=state.get("changeSet"),  # type: ignore[arg-type]
+        domain_hint=state.get("domainHint"),
+    )
     return {
         "plan": plan,
+        "domains": domains,
         "steps": ["plan_work"],
     }
 
 
 def _make_check_node(check_id: SoftwareCheckId):
     def node(state: SoftwareState) -> dict[str, Any]:
+        # Skip remaining checks when input already ERROR'd.
+        if any(
+            f.get("severity") == "error"
+            and str(f.get("code") or "").startswith(("changeset.", "input."))
+            for f in (state.get("findings") or [])
+        ):
+            return {"checksRun": [check_id], "steps": [f"check_{check_id}"]}
         findings = CHECK_RUNNERS[check_id](
             state.get("goal") or "",
             state.get("changeSet"),
@@ -173,7 +238,7 @@ def finalize(state: SoftwareState) -> dict[str, Any]:
     summary = summarize(verdict, findings, len(plan))
     note: SpecialistNote = {
         "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "verdict": verdict,
+        "verdict": verdict,  # type: ignore[typeddict-item]
         "summary": summary,
     }
     label = (state.get("changeSet") or {}).get("label") or state.get("label")
@@ -195,6 +260,13 @@ async def synthesize(
     config: RunnableConfig,
 ) -> dict[str, Any]:
     configurable = (config or {}).get("configurable") or {}
+    if (state.get("verdict") or "") == "ERROR":
+        return {
+            "narrativeSummary": "",
+            "proposedMemoryUpdates": [],
+            "synthesisNote": "skipped — input ERROR",
+            "steps": ["synthesize"],
+        }
     cs = state.get("changeSet")
     paths: list[str] = []
     if isinstance(cs, dict):
@@ -225,6 +297,58 @@ async def synthesize(
     }
 
 
+def emit_response(state: SoftwareState) -> dict[str, Any]:
+    include_bodies = bool(state.get("includeContextBodies"))
+    ref, slim = context_ref_from_bundle(
+        state.get("gssc5Context"),  # type: ignore[arg-type]
+        include_bodies=include_bodies,
+    )
+    findings = normalize_findings(state.get("findings"))  # type: ignore[arg-type]
+    # Prefer explicit input codes when present.
+    for i, raw in enumerate(state.get("findings") or []):
+        if raw.get("code") and i < len(findings):
+            findings[i]["code"] = str(raw["code"])
+    domains = list(state.get("domains") or []) or pin_domains(
+        goal=state.get("goal") or "",
+        requirements=state.get("requirements") or "",
+        change_set=state.get("changeSet"),  # type: ignore[arg-type]
+        domain_hint=state.get("domainHint"),
+    )
+    label = (
+        (state.get("changeSet") or {}).get("label")
+        or state.get("label")
+        or ""
+    )
+    payload: dict[str, Any] = {
+        "goal": state.get("goal") or "",
+        "plan": list(state.get("plan") or []),
+        "checksRun": list(state.get("checksRun") or []),
+        "narrativeSummary": state.get("narrativeSummary") or "",
+        "synthesisNote": state.get("synthesisNote") or "",
+        "proposedMemoryUpdates": list(state.get("proposedMemoryUpdates") or []),
+    }
+    response = build_graph_response(
+        tool="GSSC_Software_Dev",
+        verdict=state.get("verdict") or "FAIL",  # type: ignore[arg-type]
+        summary=state.get("summary") or "",
+        findings=findings,
+        domains=domains,  # type: ignore[arg-type]
+        payload=payload,
+        label=str(label),
+        context_ref=ref,
+    )
+    out: dict[str, Any] = {
+        "response": response,
+        "schemaVersion": "2",
+        "domains": domains,
+        "steps": ["emit_response"],
+    }
+    # Slim default: drop full skill/memory bodies from state.
+    if not include_bodies and slim is not None:
+        out["gssc5Context"] = slim  # type: ignore[assignment]
+    return out
+
+
 _CHECK_ORDER: list[SoftwareCheckId] = [
     "scope",
     "trace",
@@ -242,6 +366,7 @@ for _cid in _CHECK_ORDER:
     builder.add_node(f"check_{_cid}", _make_check_node(_cid))
 builder.add_node("finalize", finalize)
 builder.add_node("synthesize", synthesize)
+builder.add_node("emit_response", emit_response)
 
 builder.add_edge(START, "parse_input")
 builder.add_edge("parse_input", "load_gssc5_context")
@@ -254,7 +379,8 @@ builder.add_edge("check_quality", "check_third_party")
 builder.add_edge("check_third_party", "check_discipline")
 builder.add_edge("check_discipline", "finalize")
 builder.add_edge("finalize", "synthesize")
-builder.add_edge("synthesize", END)
+builder.add_edge("synthesize", "emit_response")
+builder.add_edge("emit_response", END)
 
 # Agent Server injects its own checkpointer; do not attach InMemorySaver here.
 graph = builder.compile(name="GSSC Software Dev")

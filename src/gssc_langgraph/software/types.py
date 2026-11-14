@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-SoftwareVerdict = Literal["PASS", "FAIL"]
+SoftwareVerdict = Literal["PASS", "FAIL", "ERROR"]
 FindingSeverity = Literal["error", "warning", "info"]
+PlanStepKind = Literal["implement", "test", "memory", "alm", "other"]
+PlanDomain = Literal[
+    "backend",
+    "public-fe",
+    "members-fe",
+    "admin-fe",
+    "langgraph",
+    "unknown",
+]
 
 SoftwareCheckId = Literal[
     "scope",
@@ -26,6 +35,7 @@ class SoftwareFinding(TypedDict):
     path: NotRequired[str]
     uid: NotRequired[str]
     fix: NotRequired[str]
+    code: NotRequired[str]
 
 
 class ChangedFile(TypedDict):
@@ -45,6 +55,10 @@ class PlanStep(TypedDict):
     id: str
     title: str
     detail: str
+    domain: NotRequired[PlanDomain]
+    kind: NotRequired[PlanStepKind]
+    paths: NotRequired[list[str]]
+    commands: NotRequired[list[str]]
 
 
 class SoftwareReport(TypedDict):

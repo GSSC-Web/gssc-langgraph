@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-CloseoutVerdict = Literal["PASS", "FAIL"]
+CloseoutVerdict = Literal["PASS", "FAIL", "ERROR"]
 FindingSeverity = Literal["error", "warning", "info"]
 
 CloseoutCheckId = Literal[
@@ -29,6 +29,7 @@ class CloseoutFinding(TypedDict):
     path: NotRequired[str]
     uid: NotRequired[str]
     fix: NotRequired[str]
+    code: NotRequired[str]
 
 
 class ChangedFile(TypedDict):
