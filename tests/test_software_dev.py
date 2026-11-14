@@ -85,6 +85,65 @@ async def test_plans_from_goal_alone() -> None:
 
 
 @pytest.mark.asyncio
+async def test_input_error_skips_check_workers() -> None:
+    """GLG-51: Command early-exit must not schedule check_* nodes."""
+    result = await software_graph.ainvoke(
+        {},
+        {
+            "configurable": {
+                "thread_id": f"software-err-early-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["verdict"] == "ERROR"
+    assert "dispatch_checks" in result["steps"]
+    assert not any(str(s).startswith("check_") for s in result["steps"])
+    assert result.get("checksRun") in (None, [])
+
+
+@pytest.mark.asyncio
+async def test_parallel_checks_sort_findings_and_checks_run() -> None:
+    """GLG-51: Send fan-out still runs all checks; emit sorts deterministically."""
+    result = await software_graph.ainvoke(
+        {"goal": "Plan a langgraph membership graph"},
+        {
+            "configurable": {
+                "thread_id": f"software-fanout-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["verdict"] in ("PASS", "FAIL")
+    assert "dispatch_checks" in result["steps"]
+    assert any(str(s).startswith("check_") for s in result["steps"])
+    checks = result["response"]["payload"]["checksRun"]
+    assert checks == sorted(
+        checks,
+        key=lambda c: [
+            "scope",
+            "trace",
+            "match",
+            "quality",
+            "third_party",
+            "discipline",
+        ].index(c)
+        if c
+        in {
+            "scope",
+            "trace",
+            "match",
+            "quality",
+            "third_party",
+            "discipline",
+        }
+        else 999,
+    )
+
+
+@pytest.mark.asyncio
 async def test_appends_specialist_notes_across_thread_turns() -> None:
     graph = compile_with_memory(
         software_builder, {"name": "GSSC Software Dev (test memory)"}

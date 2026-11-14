@@ -91,6 +91,14 @@ Default responses omit skill/memory `content`/`body` and clear final-state
 `includeContextBodies: true` for debug only. Target ≤~24KB typical MCP
 result without bodies.
 
+## Parallel checks (GLG-51)
+
+SoftDev and Closeout schedule independent check workers with LangGraph
+`Send` after parse/context (and SoftDev DomainPin/plan). Input ERROR
+(`changeset.*` / `input.*`) uses `Command(goto="finalize")` — check nodes
+are not walked. Findings / `checksRun` are sorted by check id before emit
+so parallel order does not flake digests. TestDev stays linear.
+
 ## Size budgets (GLG-43)
 
 - Target ≤24KB typical `response` JSON; hard cap ~48KB with `truncated: true`

@@ -100,6 +100,66 @@ async def test_loads_gssc5_reviewer_context_and_returns_verdict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_input_error_skips_check_workers() -> None:
+    """GLG-51: prose-only diff → ERROR without walking check_* nodes."""
+    result = await closeout_graph.ainvoke(
+        {
+            "label": "prose-early",
+            "diff": "Just a summary of the PR with no unified diff headers.",
+        },
+        {
+            "configurable": {
+                "thread_id": f"closeout-err-early-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["verdict"] == "ERROR"
+    assert "dispatch_checks" in result["steps"]
+    assert not any(str(s).startswith("check_") for s in result["steps"])
+    assert result.get("checksRun") in (None, [])
+    assert any(
+        f.get("code") == "changeset.required"
+        for f in result["response"]["findings"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_parallel_checks_sort_checks_run() -> None:
+    """GLG-51: Send fan-out still runs checks; payload checksRun is ordered."""
+    result = await closeout_graph.ainvoke(
+        {
+            "label": "fanout",
+            "files": MINIMAL_FILES,
+        },
+        {
+            "configurable": {
+                "thread_id": f"closeout-fanout-{uuid.uuid4()}",
+                "gssc5Enabled": False,
+                "synthesisEnabled": False,
+            }
+        },
+    )
+    assert result["verdict"] in ("PASS", "FAIL")
+    assert "dispatch_checks" in result["steps"]
+    assert any(str(s).startswith("check_") for s in result["steps"])
+    order = [
+        "scope",
+        "contracts",
+        "software_trace",
+        "software_match",
+        "software_quality",
+        "third_party",
+        "test_coverage",
+        "test_target",
+        "secrets",
+    ]
+    checks = result["response"]["payload"]["checksRun"]
+    assert checks == sorted(checks, key=lambda c: order.index(c) if c in order else 999)
+
+
+@pytest.mark.asyncio
 async def test_default_emit_clears_gssc5_context_text() -> None:
     result = await closeout_graph.ainvoke(
         {
