@@ -27,6 +27,7 @@ class SynthesizeSoftwareInput(TypedDict, total=False):
     plan: list[PlanStep]
     findings: list[SoftwareFinding]
     gssc5ContextText: str
+    changeSetPaths: list[str]
     enabled: bool
 
 
@@ -89,6 +90,7 @@ def _build_prompt(input_data: SynthesizeSoftwareInput) -> str:
         for s in (input_data.get("plan") or [])[:20]
     ]
     context = (input_data.get("gssc5ContextText") or "")[:12_000]
+    paths = [p for p in (input_data.get("changeSetPaths") or [])[:40] if p]
     return "\n".join(
         [
             "Produce a short software-dev synthesis for a Cursor / Kaneo agent.",
@@ -98,10 +100,14 @@ def _build_prompt(input_data: SynthesizeSoftwareInput) -> str:
             "Proposed memory updates are advisory only (gssc5 .agents/memories ids",
             "like backend-arch, public-arch, members-arch — or new:<slug>).",
             "Do not invent FAIL findings; respect the deterministic verdict and plan.",
+            "Do not claim markers, tests, or files were added/changed unless they",
+            "appear in changeSetPaths or the deterministic plan details below.",
+            "For mixed BE+FE plans, mention both domains — do not collapse to one.",
             "",
             f"verdict: {input_data.get('verdict') or 'UNKNOWN'}",
             f"deterministicSummary: {input_data.get('summary') or '(none)'}",
             f"goal: {input_data.get('goal') or '(none)'}",
+            f"changeSetPaths: {json.dumps(paths)}",
             f"plan: {json.dumps(plan)}",
             f"findings: {json.dumps(findings)}",
             (
