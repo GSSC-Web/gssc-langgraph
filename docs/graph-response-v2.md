@@ -99,6 +99,24 @@ SoftDev and Closeout schedule independent check workers with LangGraph
 are not walked. Findings / `checksRun` are sorted by check id before emit
 so parallel order does not flake digests. TestDev stays linear.
 
+## Ticket Store handoff (GLG-52)
+
+SoftDev → TestDev → Closeout are separate MCP one-shots. Pass a stable
+`label` and/or `kaneoTaskId` so Agent Server **Store** can carry a lean
+ticket artifact across calls (no file bodies / secrets):
+
+- Namespace: `("gssc", "ticket", <workspace|default>)`
+- Key: `kaneoTaskId` if set, else `label`
+- Fields: `schemaVersion`, `domains`, lean `plan[]`, verdicts,
+  `testCasesSummary` / `gapsSummary`, `findingCodes`, slim `contextRef`,
+  `updatedAt` / `updatedBy`
+- TTL guidance: ~72h (backend may evict earlier)
+- Opt-out: `storeHandoff: false` or `configurable.storeHandoffEnabled: false`
+- Missing Store → no-op (graphs still work)
+
+Still require a lean `changeSet` for Closeout/TestDev coverage. Always
+branch on `response.verdict` — Store is continuity, not authority.
+
 ## Size budgets (GLG-43)
 
 - Target ≤24KB typical `response` JSON; hard cap ~48KB with `truncated: true`

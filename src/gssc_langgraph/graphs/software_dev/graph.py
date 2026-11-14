@@ -25,6 +25,7 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.store.base import BaseStore
 from langgraph.types import Command, Send
 
 from gssc_langgraph.envelope import (
@@ -51,6 +52,7 @@ from gssc_langgraph.software.types import (
     SoftwareVerdict,
     SpecialistNote,
 )
+from gssc_langgraph.ticket_store import get_ticket_artifact, put_ticket_artifact
 
 
 def replace_list(left: list[Any] | None, right: list[Any] | None) -> list[Any]:
@@ -67,10 +69,13 @@ class SoftwareState(TypedDict, total=False):
     diff: str
     files: dict[str, str]
     label: str
+    kaneoTaskId: str
     fileStatuses: dict[str, FileStatus]
     changeSet: ChangeSet | None
     domainHint: str | list[str]
     includeContextBodies: bool
+    storeHandoff: bool
+    ticketHandoff: dict[str, Any]
     plan: Annotated[list[PlanStep], replace_list]
     findings: Annotated[list[SoftwareFinding], add]
     checksRun: Annotated[list[SoftwareCheckId], add]
@@ -193,6 +198,26 @@ def load_gssc5_context_node(
     }
 
 
+def load_ticket_handoff(
+    state: SoftwareState,
+    config: RunnableConfig,
+    *,
+    store: BaseStore | None = None,
+) -> dict[str, Any]:
+    """Optional prior SoftDev/TestDev artifact from Agent Server Store."""
+    configurable = (config or {}).get("configurable") or {}
+    artifact = get_ticket_artifact(store, state, configurable=configurable)
+    if not artifact:
+        return {"steps": ["load_ticket_handoff"]}
+    out: dict[str, Any] = {
+        "ticketHandoff": dict(artifact),
+        "steps": ["load_ticket_handoff"],
+    }
+    if not state.get("domains") and artifact.get("domains"):
+        out["domains"] = list(artifact["domains"])
+    return out
+
+
 def plan_work(state: SoftwareState) -> dict[str, Any]:
     goal = (state.get("goal") or "").strip()
     req = (state.get("requirements") or "").strip()
@@ -209,6 +234,10 @@ def plan_work(state: SoftwareState) -> dict[str, Any]:
         change_set=state.get("changeSet"),  # type: ignore[arg-type]
         domain_hint=state.get("domainHint"),
     )
+    if not domains or domains == ["unknown"]:
+        prior = state.get("ticketHandoff") or {}
+        if prior.get("domains"):
+            domains = list(prior["domains"])
     return {
         "plan": plan,
         "domains": domains,
@@ -335,8 +364,14 @@ async def synthesize(
     }
 
 
-def emit_response(state: SoftwareState) -> dict[str, Any]:
+def emit_response(
+    state: SoftwareState,
+    config: RunnableConfig,
+    *,
+    store: BaseStore | None = None,
+) -> dict[str, Any]:
     include_bodies = bool(state.get("includeContextBodies"))
+    configurable = (config or {}).get("configurable") or {}
     ref, slim = context_ref_from_bundle(
         state.get("gssc5Context"),  # type: ignore[arg-type]
         include_bodies=include_bodies,
@@ -388,6 +423,17 @@ def emit_response(state: SoftwareState) -> dict[str, Any]:
         out["gssc5ContextText"] = ""
         if slim is not None:
             out["gssc5Context"] = slim  # type: ignore[assignment]
+    # Cross-thread handoff (GLG-52): lean artifact keyed by label/kaneoTaskId.
+    handoff_state = {**state, "domains": domains, "findings": raw_findings}
+    artifact = put_ticket_artifact(
+        store,
+        handoff_state,
+        updated_by="SoftDev",
+        configurable=configurable,
+        context_ref=ref,
+    )
+    if artifact is not None:
+        out["ticketHandoff"] = dict(artifact)
     return out
 
 
@@ -402,6 +448,7 @@ _CHECK_ORDER: list[SoftwareCheckId] = [
 
 builder = StateGraph(SoftwareState)
 builder.add_node("parse_input", parse_input)
+builder.add_node("load_ticket_handoff", load_ticket_handoff)
 builder.add_node("load_gssc5_context", load_gssc5_context_node)
 builder.add_node("plan_work", plan_work)
 builder.add_node("dispatch_checks", dispatch_checks)
@@ -412,7 +459,8 @@ builder.add_node("synthesize", synthesize)
 builder.add_node("emit_response", emit_response)
 
 builder.add_edge(START, "parse_input")
-builder.add_edge("parse_input", "load_gssc5_context")
+builder.add_edge("parse_input", "load_ticket_handoff")
+builder.add_edge("load_ticket_handoff", "load_gssc5_context")
 builder.add_edge("load_gssc5_context", "plan_work")
 builder.add_edge("plan_work", "dispatch_checks")
 # dispatch_checks returns Command(Send…) or Command(goto=finalize).
@@ -422,5 +470,5 @@ builder.add_edge("finalize", "synthesize")
 builder.add_edge("synthesize", "emit_response")
 builder.add_edge("emit_response", END)
 
-# Agent Server injects its own checkpointer; do not attach InMemorySaver here.
+# Agent Server injects checkpointer + Store; do not attach custom ones here.
 graph = builder.compile(name="GSSC Software Dev")

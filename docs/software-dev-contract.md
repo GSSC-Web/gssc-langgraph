@@ -23,9 +23,12 @@ Provide a **goal** and/or a change set. Prefer combining a goal with files/diff 
 | `changeSet` | object | Pre-built `{ label, files[], diff? }` (skips rebuild when present) |
 | `includeContextBodies` | `boolean` | Debug only — keep fat `gssc5ContextText` / skill bodies (default false) |
 | `domainHint` | `string \| string[]` | Optional DomainPin override |
+| `kaneoTaskId` | `string` | Stable Kaneo id for Store handoff join key (GLG-52) |
+| `storeHandoff` | `boolean` | Set `false` to skip Agent Server Store put/get (default on) |
 
 **v2 consumer:** read `response.verdict` / `response.payload` — ignore top-level
-`gssc5ContextText` (cleared by default).
+`gssc5ContextText` (cleared by default). Pass stable `label`/`kaneoTaskId` for
+SoftDev→TestDev→Closeout Store continuity.
 
 ### RunnableConfig overrides
 

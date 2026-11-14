@@ -4,6 +4,8 @@ Contract for short-lived Cursor / Kaneo agents invoking assistant id `closeout_r
 
 **v2 envelope:** every run emits `response` with `schemaVersion: "2"`. Branch on `response.verdict` (`PASS`|`FAIL`|`ERROR`). Prose-only `diff` → `ERROR` / `changeset.required`. Lean changeSet: `files[{path,status}]` + `diff --git` (full `content` discouraged). See [graph-response-v2.md](graph-response-v2.md).
 
+**Store handoff (GLG-52):** reuse the same `label` / `kaneoTaskId` as SoftDev/TestDev so Agent Server Store can load a lean prior artifact (`payload.ticketHandoff`). Still require a lean changeSet — Store is continuity, not a substitute. Opt out with `storeHandoff: false`.
+
 Deterministic checks are always model-free. gssc5 context loads via the **`reviewer`** preset. Optional LLM synthesis runs only when `XAI_API_KEY` is set.
 
 ## Agent Server auth
