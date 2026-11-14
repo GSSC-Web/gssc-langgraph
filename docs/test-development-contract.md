@@ -10,15 +10,24 @@ Deterministic contract → coverage analysis is always model-free. gssc5 context
 
 ## Input
 
-Provide **at least one** change-set signal (files and/or diff). Workspace / git collection via the CLI is the usual path.
+Provide a **usable change set** (files and/or unified `diff --git`). Optional
+`goal` / `requirements` feed DomainPin and testCases/gaps cues. Empty
+invocation (no changeSet and no goal/requirements) → **ERROR**, not soft PASS.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
+| `goal` | `string \| string[]` | Optional test goal / brief (mirror SoftDev; lists joined) |
+| `requirements` | `string \| string[]` | Optional LLR / coverage cues (lists joined) |
 | `files` | `Record<string, string>` | Path → file contents (primary change-set form) |
 | `fileStatuses` | `Record<string, "added"\|"modified"\|"deleted"\|"unchanged">` | Optional statuses for `files` |
 | `diff` | `string` | Optional unified diff (paths merged into the change set) |
 | `label` | `string` | Human label for the change set |
 | `changeSet` | object | Pre-built `{ label, files[], diff? }` (skips rebuild when present) |
+| `includeContextBodies` | `boolean` | Debug only — keep fat `gssc5ContextText` / skill bodies (default false) |
+| `domainHint` | `string \| string[]` | Optional DomainPin override |
+
+**v2 consumer:** read `response.verdict` / `response.payload.testCases|gaps`.
+Goal-only (no changeSet) → `ERROR` with `changeset.required`.
 
 ### RunnableConfig overrides
 
@@ -62,7 +71,8 @@ CLI equivalent: `uv run test-dev --workspace` or `--diff pr.patch` (collects the
 | `steps` | `string[]` | Graph step names (`parse_changeset`, `load_gssc5_context`, `analyze`, `verdict`, `synthesize`, …) |
 | `changeSet` | object \| null | Normalized change set |
 | `gssc5Context` | object \| null | Structured skills/memories bundle |
-| `gssc5ContextText` | `string` | Flattened markdown for prompts |
+| `gssc5ContextText` | `string` | Flattened markdown for prompts (empty unless `includeContextBodies`) |
+| `response` | object | Canonical v2 GraphResponse — **branch here** |
 | `gssc5Root` | `string` | Resolved checkout path (may be `""`) |
 | `narrativeSummary` | `string` | LLM NL summary, or deterministic `summary` when synthesis skipped |
 | `proposedMemoryUpdates` | `{ memoryId, summary, rationale? }[]` | Advisory only — never auto-applied |

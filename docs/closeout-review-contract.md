@@ -114,7 +114,8 @@ CLI equivalent: `uv run closeout --workspace` or `--diff pr.patch` (collects the
 | `steps` | `string[]` | Graph step names (`parse_changeset`, `load_gssc5_context`, `check_*`, `verdict`, `synthesize`, …) |
 | `changeSet` | object \| null | Normalized change set |
 | `gssc5Context` | object \| null | Structured skills/memories bundle (`skills`, `memories`, `selected`, `note`, `root`) |
-| `gssc5ContextText` | `string` | Flattened markdown for prompts |
+| `gssc5ContextText` | `string` | Flattened markdown for prompts (empty unless `includeContextBodies`) |
+| `response` | object | Canonical v2 GraphResponse — **branch here** |
 | `gssc5Root` | `string` | Resolved checkout path (may be `""`) |
 | `narrativeSummary` | `string` | LLM NL summary, or deterministic `summary` when synthesis skipped |
 | `proposedMemoryUpdates` | `{ memoryId, summary, rationale? }[]` | Advisory only — never auto-applied |
@@ -135,9 +136,9 @@ CLI equivalent: `uv run closeout --workspace` or `--diff pr.patch` (collects the
 
 ### Agent consumption tips
 
-1. Treat `verdict` + `findings` as authoritative; ignore LLM text for PASS/FAIL.
+1. Treat `response.verdict` + `response.findings` as authoritative; ignore LLM text for PASS/FAIL.
 2. If scope findings mention prose/`diff --git`, retry immediately with `files` or a real patch — do not treat that warning pass as a completed closeout.
-3. Use `gssc5ContextText` (or `gssc5Context.skills`) when drafting follow-up fixes.
+3. Use `response.contextRef` by default; set `includeContextBodies: true` only when you need fat `gssc5ContextText` / skill bodies for drafting.
 4. Surface `proposedMemoryUpdates` to a human; do not write them into gssc5 automatically.
 5. Missing gssc5 checkout → empty `gssc5Context` + `note`; graph still returns `verdict`.
 6. Missing `XAI_API_KEY` → `synthesisNote` starts with `skipped:`; graph still returns `verdict`.
