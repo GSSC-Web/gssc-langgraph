@@ -25,9 +25,12 @@ invocation (no changeSet and no goal/requirements) → **ERROR**, not soft PASS.
 | `changeSet` | object | Pre-built `{ label, files[], diff? }` (skips rebuild when present) |
 | `includeContextBodies` | `boolean` | Debug only — keep fat `gssc5ContextText` / skill bodies (default false) |
 | `domainHint` | `string \| string[]` | Optional DomainPin override |
+| `kaneoTaskId` | `string` | Stable Kaneo id for Store handoff join key (GLG-52) |
+| `storeHandoff` | `boolean` | Set `false` to skip Agent Server Store put/get (default on) |
 
 **v2 consumer:** read `response.verdict` / `response.payload.testCases|gaps`.
-Goal-only (no changeSet) → `ERROR` with `changeset.required`.
+Goal-only (no changeSet) → `ERROR` with `changeset.required`. Reuse the same
+`label`/`kaneoTaskId` as SoftDev for Store handoff.
 
 ### RunnableConfig overrides
 

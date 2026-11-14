@@ -28,6 +28,7 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.store.base import BaseStore
 from langgraph.types import Command, Send
 
 from gssc_langgraph.closeout.checks import (
@@ -61,6 +62,7 @@ from gssc_langgraph.gssc5 import (
     load_gssc5_context_for_role,
 )
 from gssc_langgraph.gssc5.types import Gssc5ContextBundle
+from gssc_langgraph.ticket_store import get_ticket_artifact, put_ticket_artifact
 
 
 def replace_list(left: list[Any] | None, right: list[Any] | None) -> list[Any]:
@@ -82,6 +84,8 @@ class CloseoutState(TypedDict, total=False):
     changeSet: ChangeSet | None
     domainHint: str | list[str]
     includeContextBodies: bool
+    storeHandoff: bool
+    ticketHandoff: dict[str, Any]
     findings: Annotated[list[CloseoutFinding], add]
     checksRun: Annotated[list[CloseoutCheckId], add]
     verdict: CloseoutVerdict | str
@@ -170,6 +174,40 @@ def parse_changeset(state: CloseoutState) -> dict[str, Any]:
         "domains": domains,
         "steps": ["parse_changeset"],
     }
+
+
+def load_ticket_handoff(
+    state: CloseoutState,
+    config: RunnableConfig,
+    *,
+    store: BaseStore | None = None,
+) -> dict[str, Any]:
+    """Load SoftDev/TestDev lean artifact; still require lean changeSet (GLG-39)."""
+    configurable = (config or {}).get("configurable") or {}
+    artifact = get_ticket_artifact(store, state, configurable=configurable)
+    if not artifact:
+        return {"steps": ["load_ticket_handoff"]}
+    out: dict[str, Any] = {
+        "ticketHandoff": dict(artifact),
+        "steps": ["load_ticket_handoff"],
+    }
+    if not state.get("domains") and artifact.get("domains"):
+        out["domains"] = list(artifact["domains"])
+    # Info-only enrichment — does not replace changeSet requirements.
+    prior_codes = list(artifact.get("findingCodes") or [])
+    if prior_codes:
+        out["findings"] = [
+            {
+                "check": "scope",
+                "severity": "info",
+                "code": "handoff.prior_findings",
+                "message": (
+                    "Prior SoftDev/TestDev finding codes from Store handoff: "
+                    + ", ".join(prior_codes[:12])
+                ),
+            }
+        ]
+    return out
 
 
 def load_gssc5_context_node(
@@ -315,8 +353,14 @@ async def synthesize(state: CloseoutState, config: RunnableConfig) -> dict[str, 
     }
 
 
-def emit_response(state: CloseoutState) -> dict[str, Any]:
+def emit_response(
+    state: CloseoutState,
+    config: RunnableConfig,
+    *,
+    store: BaseStore | None = None,
+) -> dict[str, Any]:
     include_bodies = bool(state.get("includeContextBodies"))
+    configurable = (config or {}).get("configurable") or {}
     ref, slim = context_ref_from_bundle(
         state.get("gssc5Context"),  # type: ignore[arg-type]
         include_bodies=include_bodies,
@@ -330,6 +374,10 @@ def emit_response(state: CloseoutState) -> dict[str, Any]:
         change_set=state.get("changeSet"),  # type: ignore[arg-type]
         domain_hint=state.get("domainHint"),
     )
+    if (not domains or domains == ["unknown"]) and (state.get("ticketHandoff") or {}).get(
+        "domains"
+    ):
+        domains = list(state["ticketHandoff"]["domains"])  # type: ignore[index]
     label = (
         (state.get("changeSet") or {}).get("label")
         or state.get("label")
@@ -344,6 +392,19 @@ def emit_response(state: CloseoutState) -> dict[str, Any]:
         "narrativeSummary": state.get("narrativeSummary") or "",
         "synthesisNote": state.get("synthesisNote") or "",
     }
+    if state.get("ticketHandoff"):
+        payload["ticketHandoff"] = {
+            k: state["ticketHandoff"][k]
+            for k in (
+                "schemaVersion",
+                "softDevVerdict",
+                "testDevVerdict",
+                "plan",
+                "testCasesSummary",
+                "gapsSummary",
+            )
+            if k in state["ticketHandoff"]
+        }
     response = build_graph_response(
         tool="GSSC_Closeout_Review",
         verdict=state.get("verdict") or "FAIL",  # type: ignore[arg-type]
@@ -365,6 +426,16 @@ def emit_response(state: CloseoutState) -> dict[str, Any]:
         out["gssc5ContextText"] = ""
         if slim is not None:
             out["gssc5Context"] = slim  # type: ignore[assignment]
+    handoff_state = {**state, "domains": domains, "findings": raw_findings}
+    artifact = put_ticket_artifact(
+        store,
+        handoff_state,
+        updated_by="Closeout",
+        configurable=configurable,
+        context_ref=ref,
+    )
+    if artifact is not None:
+        out["ticketHandoff"] = dict(artifact)
     return out
 
 
@@ -382,6 +453,7 @@ _CHECK_ORDER: list[CloseoutCheckId] = [
 
 builder = StateGraph(CloseoutState)
 builder.add_node("parse_changeset", parse_changeset)
+builder.add_node("load_ticket_handoff", load_ticket_handoff)
 builder.add_node("load_gssc5_context", load_gssc5_context_node)
 builder.add_node("dispatch_checks", dispatch_checks)
 for _cid in _CHECK_ORDER:
@@ -391,7 +463,8 @@ builder.add_node("synthesize", synthesize)
 builder.add_node("emit_response", emit_response)
 
 builder.add_edge(START, "parse_changeset")
-builder.add_edge("parse_changeset", "load_gssc5_context")
+builder.add_edge("parse_changeset", "load_ticket_handoff")
+builder.add_edge("load_ticket_handoff", "load_gssc5_context")
 builder.add_edge("load_gssc5_context", "dispatch_checks")
 # dispatch_checks returns Command(Send…) or Command(goto=finalize).
 for _cid in _CHECK_ORDER:
@@ -400,5 +473,5 @@ builder.add_edge("finalize", "synthesize")
 builder.add_edge("synthesize", "emit_response")
 builder.add_edge("emit_response", END)
 
-# Agent Server injects its own checkpointer; do not attach InMemorySaver here.
+# Agent Server injects checkpointer + Store; do not attach custom ones here.
 graph = builder.compile(name="GSSC Closeout Review")

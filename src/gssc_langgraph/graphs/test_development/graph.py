@@ -20,6 +20,7 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.store.base import BaseStore
 
 from gssc_langgraph.envelope import (
     build_graph_response,
@@ -33,6 +34,7 @@ from gssc_langgraph.gssc5 import format_gssc5_context, load_gssc5_context_for_ro
 from gssc_langgraph.gssc5.types import Gssc5ContextBundle
 from gssc_langgraph.test_dev.analyze import run_analysis, summarize, verdict_from
 from gssc_langgraph.test_dev.synthesize import synthesize_test_dev
+from gssc_langgraph.ticket_store import get_ticket_artifact, put_ticket_artifact
 from gssc_langgraph.work_surface import looks_like_unified_diff
 from gssc_langgraph.test_dev.types import (
     ChangeSet,
@@ -62,11 +64,14 @@ class TestDevState(TypedDict, total=False):
     diff: str
     files: dict[str, str]
     label: str
+    kaneoTaskId: str
     requirements: str
     fileStatuses: dict[str, FileStatus]
     changeSet: ChangeSet | None
     domainHint: str | list[str]
     includeContextBodies: bool
+    storeHandoff: bool
+    ticketHandoff: dict[str, Any]
     scopeGraphIds: Annotated[list[str], replace_list]
     contracts: Annotated[list[Contract], replace_list]
     coverage: Annotated[list[CoverageLink], replace_list]
@@ -182,6 +187,25 @@ def parse_changeset(state: TestDevState) -> dict[str, Any]:
         "findings": findings,
         "steps": ["parse_changeset"],
     }
+
+
+def load_ticket_handoff(
+    state: TestDevState,
+    config: RunnableConfig,
+    *,
+    store: BaseStore | None = None,
+) -> dict[str, Any]:
+    configurable = (config or {}).get("configurable") or {}
+    artifact = get_ticket_artifact(store, state, configurable=configurable)
+    if not artifact:
+        return {"steps": ["load_ticket_handoff"]}
+    out: dict[str, Any] = {
+        "ticketHandoff": dict(artifact),
+        "steps": ["load_ticket_handoff"],
+    }
+    if not state.get("domains") and artifact.get("domains"):
+        out["domains"] = list(artifact["domains"])
+    return out
 
 
 def load_gssc5_context_node(
@@ -346,8 +370,14 @@ async def synthesize(
     }
 
 
-def emit_response(state: TestDevState) -> dict[str, Any]:
+def emit_response(
+    state: TestDevState,
+    config: RunnableConfig,
+    *,
+    store: BaseStore | None = None,
+) -> dict[str, Any]:
     include_bodies = bool(state.get("includeContextBodies"))
+    configurable = (config or {}).get("configurable") or {}
     ref, slim = context_ref_from_bundle(
         state.get("gssc5Context"),  # type: ignore[arg-type]
         include_bodies=include_bodies,
@@ -363,6 +393,10 @@ def emit_response(state: TestDevState) -> dict[str, Any]:
         change_set=state.get("changeSet"),  # type: ignore[arg-type]
         domain_hint=state.get("domainHint"),
     )
+    if (not domains or domains == ["unknown"]) and (state.get("ticketHandoff") or {}).get(
+        "domains"
+    ):
+        domains = list(state["ticketHandoff"]["domains"])  # type: ignore[index]
     label = (
         (state.get("changeSet") or {}).get("label")
         or state.get("label")
@@ -399,11 +433,22 @@ def emit_response(state: TestDevState) -> dict[str, Any]:
         out["gssc5ContextText"] = ""
         if slim is not None:
             out["gssc5Context"] = slim  # type: ignore[assignment]
+    handoff_state = {**state, "domains": domains}
+    artifact = put_ticket_artifact(
+        store,
+        handoff_state,
+        updated_by="TestDev",
+        configurable=configurable,
+        context_ref=ref,
+    )
+    if artifact is not None:
+        out["ticketHandoff"] = dict(artifact)
     return out
 
 
 builder = StateGraph(TestDevState)
 builder.add_node("parse_changeset", parse_changeset)
+builder.add_node("load_ticket_handoff", load_ticket_handoff)
 builder.add_node("load_gssc5_context", load_gssc5_context_node)
 builder.add_node("analyze", analyze_scope)
 builder.add_node("finalize", finalize)
@@ -411,12 +456,13 @@ builder.add_node("synthesize", synthesize)
 builder.add_node("emit_response", emit_response)
 
 builder.add_edge(START, "parse_changeset")
-builder.add_edge("parse_changeset", "load_gssc5_context")
+builder.add_edge("parse_changeset", "load_ticket_handoff")
+builder.add_edge("load_ticket_handoff", "load_gssc5_context")
 builder.add_edge("load_gssc5_context", "analyze")
 builder.add_edge("analyze", "finalize")
 builder.add_edge("finalize", "synthesize")
 builder.add_edge("synthesize", "emit_response")
 builder.add_edge("emit_response", END)
 
-# Agent Server injects its own checkpointer; do not attach InMemorySaver here.
+# Agent Server injects checkpointer + Store; do not attach custom ones here.
 graph = builder.compile(name="GSSC Test Development")
