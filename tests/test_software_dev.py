@@ -235,4 +235,37 @@ def test_build_plan_specializes_for_gssc5_fe() -> None:
     assert not any(s["id"] == "scaffold_graph" for s in plan)
     assert any("Angular" in s["detail"] or "Tailwind" in s["detail"] for s in plan)
     assert any("ng test" in s["detail"] for s in plan)
+    assert any(s["title"] == "Scope the FE work" for s in plan)
     assert not any("src/gssc_langgraph" in s["detail"] for s in plan)
+
+
+def test_build_plan_specializes_for_gssc5_be() -> None:
+    cs: ChangeSet = {
+        "label": "gssc5-56",
+        "files": [
+            {
+                "path": "gssc5-web/apps/backend/src/login-session.ts",
+                "status": "modified",
+                "content": "export async function resolveLoginSessionUser() {}\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/user/users.ts",
+                "status": "modified",
+                "content": "import { resolveLoginSessionUser } from '../login-session'\n",
+            },
+            {
+                "path": "gssc5-web/apps/backend/src/user/users.test.ts",
+                "status": "modified",
+                "content": "test('session', () => { expect(ok).toBeDefined() })\n",
+            },
+        ],
+    }
+    goal = "Consolidate duplicated Bun/Elysia/Prisma login-session user resolve helpers"
+    plan = build_plan(goal, cs)
+    assert any(s["title"] == "Scope the BE work" for s in plan)
+    assert not any(s["title"] == "Scope the FE work" for s in plan)
+    assert not any(s["id"] == "scaffold_graph" for s in plan)
+    assert any("Elysia" in s["detail"] or "Bun" in s["detail"] for s in plan)
+    assert any("bun test" in s["detail"] or "mise run //backend:test" in s["detail"] for s in plan)
+    assert not any("bunx ng" in s["detail"] for s in plan)
+    assert not any("Scope the FE work" in s["title"] for s in plan)

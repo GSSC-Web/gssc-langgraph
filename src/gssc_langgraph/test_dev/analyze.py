@@ -26,13 +26,10 @@ from gssc_langgraph.test_dev.types import (
     TestDevCheckId,
     TestDevVerdict,
 )
-from gssc_langgraph.work_surface import detect_work_surface
+from gssc_langgraph.work_surface import classify_path, detect_work_surface
 
 TEST_FILE_RE = re.compile(r"^tests/.+\.py$")
-FE_TEST_FILE_RE = re.compile(r"(?i).+\.test\.(?:ts|js)$")
-FE_SOURCE_RE = re.compile(
-    r"(?i)(gssc5-web/|prompt-overlay/|.+\.(?:component|html)\.(?:ts|js)$|.+\.html$)"
-)
+APP_TEST_FILE_RE = re.compile(r"(?i).+\.test\.(?:ts|js)$")
 
 
 def _text_of(cs: ChangeSet, path: str) -> str:
@@ -75,16 +72,37 @@ def _fe_files(cs: ChangeSet) -> list[str]:
     return [
         f["path"]
         for f in cs["files"]
-        if f["status"] != "deleted" and FE_SOURCE_RE.search(f["path"])
+        if f["status"] != "deleted" and classify_path(f["path"]) == "gssc5_fe"
     ]
 
 
-def _fe_test_files(cs: ChangeSet) -> list[dict[str, str]]:
+def _be_files(cs: ChangeSet) -> list[str]:
+    return [
+        f["path"]
+        for f in cs["files"]
+        if f["status"] != "deleted" and classify_path(f["path"]) == "gssc5_be"
+    ]
+
+
+def _app_test_files(cs: ChangeSet, *, surface: str) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for f in cs["files"]:
-        if FE_TEST_FILE_RE.search(f["path"]) and f["status"] != "deleted":
+        if not APP_TEST_FILE_RE.search(f["path"]) or f["status"] == "deleted":
+            continue
+        kind = classify_path(f["path"])
+        if surface == "gssc5_fe" and kind == "gssc5_fe":
+            out.append({"path": f["path"], "body": f.get("content") or ""})
+        elif surface == "gssc5_be" and kind == "gssc5_be":
             out.append({"path": f["path"], "body": f.get("content") or ""})
     return out
+
+
+def _fe_test_files(cs: ChangeSet) -> list[dict[str, str]]:
+    return _app_test_files(cs, surface="gssc5_fe")
+
+
+def _be_test_files(cs: ChangeSet) -> list[dict[str, str]]:
+    return _app_test_files(cs, surface="gssc5_be")
 
 
 def resolve_scope(cs: ChangeSet) -> tuple[list[str], list[Finding]]:
@@ -122,19 +140,33 @@ def resolve_scope(cs: ChangeSet) -> tuple[list[str], list[Finding]]:
                 graph_ids = all_ids
 
     if not graph_ids:
-        if surface in ("gssc5_fe", "gssc5_be") or _fe_files(cs):
+        if surface == "gssc5_be" or _be_files(cs):
             findings.append(
                 {
                     "check": "scope",
                     "severity": "info",
                     "message": (
-                        "gssc5 app change set — scoping FE/BE component tests "
+                        "gssc5 backend change set — scoping Bun/Elysia tests "
+                        "(not Angular FE or LangGraph graphs)"
+                    ),
+                    "fix": (
+                        "Prefer `bun test` / `mise run //backend:test` beside "
+                        "`apps/backend` sources; do not suggest `ng test`."
+                    ),
+                }
+            )
+        elif surface == "gssc5_fe" or _fe_files(cs):
+            findings.append(
+                {
+                    "check": "scope",
+                    "severity": "info",
+                    "message": (
+                        "gssc5 FE change set — scoping Angular/component tests "
                         "(not LangGraph graphs)"
                     ),
                     "fix": (
-                        "Prefer companion `*.test.ts` / API tests beside the "
-                        "touched app files; graph.invoke pytest is for this "
-                        "service only."
+                        "Prefer companion `*.test.ts` beside the touched FE "
+                        "files; graph.invoke pytest is for this service only."
                     ),
                 }
             )
@@ -357,10 +389,22 @@ def check_timing(
     tests = _test_files(cs)
     surface = detect_work_surface(change_set=cs)
 
+    if (surface == "gssc5_be" or _be_files(cs)) and not scope_graph_ids:
+        be_tests = _be_test_files(cs)
+        commands.append("mise run //backend:test")
+        if be_tests:
+            for t in be_tests[:4]:
+                commands.append(f"bun test {t['path']}")
+        else:
+            for path in _be_files(cs)[:3]:
+                if path.endswith(".ts") and not path.endswith(".test.ts"):
+                    companion = path[: -len(".ts")] + ".test.ts"
+                    commands.append(f"bun test {companion}")
+        return findings, commands
+
     if (surface == "gssc5_fe" or _fe_files(cs)) and not scope_graph_ids:
         fe_tests = _fe_test_files(cs)
         if fe_tests:
-            # Prefer a module include glob from the first test path.
             sample = fe_tests[0]["path"]
             if "prompt-overlay" in sample:
                 commands.append(
@@ -422,8 +466,8 @@ def check_timing(
     return findings, commands
 
 
-def _companion_fe_test(path: str) -> str | None:
-    if FE_TEST_FILE_RE.search(path):
+def _companion_app_test(path: str) -> str | None:
+    if APP_TEST_FILE_RE.search(path):
         return None
     if path.endswith(".html") or path.endswith(".ts"):
         stem = path.rsplit(".", 1)[0]
@@ -441,7 +485,7 @@ def _build_fe_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
     fe_test_names = {p.rsplit("/", 1)[-1] for p in fe_tests}
 
     for path in fe_sources:
-        companion = _companion_fe_test(path)
+        companion = _companion_app_test(path)
         if not companion:
             continue
         if companion in fe_tests or companion.rsplit("/", 1)[-1] in fe_test_names:
@@ -483,6 +527,56 @@ def _build_fe_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
     return plan
 
 
+def _build_be_plan(cs: ChangeSet, commands: list[str]) -> list[PlanItem]:
+    plan: list[PlanItem] = []
+    be_sources = _be_files(cs)
+    be_tests = {t["path"] for t in _be_test_files(cs)}
+    be_test_names = {p.rsplit("/", 1)[-1] for p in be_tests}
+
+    for path in be_sources:
+        companion = _companion_app_test(path)
+        if not companion:
+            continue
+        if companion in be_tests or companion.rsplit("/", 1)[-1] in be_test_names:
+            continue
+        plan.append(
+            {
+                "action": "add_test",
+                "path": companion,
+                "description": (
+                    f"Ensure companion Bun test covers {path} "
+                    "(Elysia/Prisma contract asserts — not FE component harness)"
+                ),
+                "suggestedTest": (
+                    "// Prefer existing Bun *.test.ts patterns in apps/backend.\n"
+                    "// Assert API/handler contracts — not graph.invoke.\n"
+                ),
+            }
+        )
+
+    if not plan and be_sources:
+        plan.append(
+            {
+                "action": "update_test",
+                "description": (
+                    "Update focused backend Bun `*.test.ts` for touched "
+                    "Elysia/Prisma modules; prefer `bun test` / "
+                    "`mise run //backend:test`."
+                ),
+                "path": be_sources[0],
+            }
+        )
+
+    for cmd in commands[:3]:
+        plan.append(
+            {
+                "action": "run_focused",
+                "description": f"Prefer focused harness: {cmd}",
+            }
+        )
+    return plan
+
+
 def build_plan(
     contracts: list[Contract],
     coverage: list[CoverageLink],
@@ -494,11 +588,16 @@ def build_plan(
     plan: list[PlanItem] = []
 
     surface = detect_work_surface(change_set=change_set) if change_set else "unknown"
-    if change_set and (
-        surface == "gssc5_fe"
-        or (surface in ("gssc5_be", "mixed", "unknown") and _fe_files(change_set))
-    ) and not any(c.get("graphId") for c in contracts):
-        return _build_fe_plan(change_set, commands)
+    has_graph_contracts = any(c.get("graphId") for c in contracts)
+    if change_set and not has_graph_contracts:
+        if surface == "gssc5_be" or (
+            surface in ("mixed", "unknown") and _be_files(change_set) and not _fe_files(change_set)
+        ):
+            return _build_be_plan(change_set, commands)
+        if surface == "gssc5_fe" or (
+            surface in ("mixed", "unknown") and _fe_files(change_set)
+        ):
+            return _build_fe_plan(change_set, commands)
 
     for link in coverage:
         if link["covered"]:

@@ -9,19 +9,24 @@ WorkSurface = Literal["langgraph", "gssc5_fe", "gssc5_be", "mixed", "unknown"]
 
 _DIFF_GIT_RE = re.compile(r"(?m)^diff --git ")
 
+# Prefer specific app roots. Do NOT match bare ``gssc5-web/`` (that folder
+# holds both FE apps and ``apps/backend``).
+_BE_PATH_RE = re.compile(
+    r"(?i)(^|/)"
+    r"(gssc5-web/apps/backend/"
+    r"|apps/backend/"
+    r"|gssc5-(?:api|backend|server)/"
+    r"|apps/api/"
+    r"|prisma/"
+    r"|nest-cli\.json$)"
+)
 _FE_PATH_RE = re.compile(
     r"(?i)(^|/)"
-    r"(gssc5-web/"
+    r"(gssc5-web/apps/(?:public|members|admin)/"
     r"|apps/(?:public|members|admin)/"
     r"|prompt-overlay/"
     r"|[^/]+\.(?:component|html|scss|css)\.(?:ts|js)$"
     r"|[^/]+\.html$)"
-)
-_BE_PATH_RE = re.compile(
-    r"(?i)(^|/)"
-    r"(gssc5-(?:api|backend|server)/"
-    r"|apps/api/"
-    r"|nest-cli\.json$)"
 )
 _LANGGRAPH_PATH_RE = re.compile(
     r"(?i)(^|/)"
@@ -32,11 +37,12 @@ _LANGGRAPH_PATH_RE = re.compile(
 )
 
 _FE_GOAL_RE = re.compile(
-    r"(?i)\b(angular|tailwind|prompt[- ]overlay|gssc5-web|css token|"
+    r"(?i)\b(angular|tailwind|prompt[- ]overlay|css token|"
     r"border-gssc|theme token)\b"
 )
 _BE_GOAL_RE = re.compile(
-    r"(?i)\b(gssc5[- ]?(api|backend|server)|nestjs|nest\.js)\b"
+    r"(?i)\b(elysia|prisma|prismabox|bun test|apps/backend|"
+    r"gssc5[- ]?(api|backend|server)|login[- ]session|nestjs|nest\.js)\b"
 )
 _LANGGRAPH_GOAL_RE = re.compile(
     r"(?i)\b(langgraph|assistant id|graph\.py|agent server|"
@@ -58,6 +64,20 @@ def _paths_from_change_set(change_set: dict[str, Any] | None) -> list[str]:
     return [str(f.get("path") or "") for f in files if f.get("path")]
 
 
+def classify_path(path: str) -> WorkSurface | None:
+    """Classify one filesystem path. Backend wins over FE for shared roots."""
+    if not path:
+        return None
+    # BE before FE: ``gssc5-web/apps/backend`` must not look like FE.
+    if _BE_PATH_RE.search(path):
+        return "gssc5_be"
+    if _FE_PATH_RE.search(path):
+        return "gssc5_fe"
+    if _LANGGRAPH_PATH_RE.search(path):
+        return "langgraph"
+    return None
+
+
 def detect_work_surface(
     goal: str = "",
     change_set: dict[str, Any] | None = None,
@@ -68,30 +88,34 @@ def detect_work_surface(
     text = f"{goal}\n{requirements}".strip()
     paths = _paths_from_change_set(change_set)
 
-    fe_paths = any(_FE_PATH_RE.search(p) for p in paths)
-    be_paths = any(_BE_PATH_RE.search(p) for p in paths)
-    lg_paths = any(_LANGGRAPH_PATH_RE.search(p) for p in paths)
+    kinds: set[WorkSurface] = set()
+    for path in paths:
+        kind = classify_path(path)
+        if kind:
+            kinds.add(kind)
 
-    if sum(bool(x) for x in (fe_paths, be_paths, lg_paths)) > 1:
-        return "mixed"
-    if fe_paths:
-        return "gssc5_fe"
-    if be_paths:
-        return "gssc5_be"
-    if lg_paths:
-        return "langgraph"
-
-    kinds: list[WorkSurface] = []
-    if _FE_GOAL_RE.search(text):
-        kinds.append("gssc5_fe")
-    if _BE_GOAL_RE.search(text):
-        kinds.append("gssc5_be")
-    if _LANGGRAPH_GOAL_RE.search(text):
-        kinds.append("langgraph")
     if len(kinds) > 1:
         return "mixed"
     if len(kinds) == 1:
-        return kinds[0]
+        return next(iter(kinds))
+
+    goal_kinds: list[WorkSurface] = []
+    if _FE_GOAL_RE.search(text):
+        goal_kinds.append("gssc5_fe")
+    if _BE_GOAL_RE.search(text):
+        goal_kinds.append("gssc5_be")
+    if _LANGGRAPH_GOAL_RE.search(text):
+        goal_kinds.append("langgraph")
+    if len(goal_kinds) > 1:
+        # Prefer BE when Elysia/backend cues beat generic Angular noise.
+        if "gssc5_be" in goal_kinds and "gssc5_fe" in goal_kinds:
+            if _BE_GOAL_RE.search(text) and not re.search(
+                r"(?i)\b(angular|tailwind|prompt[- ]overlay)\b", text
+            ):
+                return "gssc5_be"
+        return "mixed"
+    if len(goal_kinds) == 1:
+        return goal_kinds[0]
     return "unknown"
 
 
